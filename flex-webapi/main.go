@@ -1,6 +1,5 @@
 // flex-web-api: a small HTTP service that wraps flex-convert-cli.
 
-
 package main
 
 import (
@@ -15,6 +14,7 @@ import (
 	"strings"
 	"time"
 )
+
 
 // Define cli executable location
 const cliPath = "./flex-convert-cli"
@@ -112,7 +112,8 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	http.HandleFunc("/convert", convertHandler)
-
+	// Serve the front-end (index.html, etc.) from ./static
+	http.Handle("/", http.FileServer(http.Dir("./static")))
 	addr := ":8080"
 	log.Printf("flex-web-api listening on %s", addr)
 	log.Fatal(http.ListenAndServe(addr, nil))

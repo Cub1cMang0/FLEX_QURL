@@ -8,18 +8,12 @@
 ## Run it
 
 ```bash
-go build -o flex-web-api main.go
-./flex-web-api
-# listening on :8080
+go build -o flex-web-api main.go && ./flex-web-api
 ```
 
 ## Test it
 
-```bash
-curl -X POST "http://localhost:8080/convert?to=ico" \
-  -F "file=@file_name_here.png" \
-  -o result.ico
-```
+Go to localhost:8080 and test the file conversion
 
 ## How it works
 
