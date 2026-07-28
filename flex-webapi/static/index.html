@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FLEX — file conversion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --blueprint: #10222c;
+    --blueprint-deep: #0a1922;
+    --grid-line: rgba(232, 163, 61, 0.14);
+    --grid-line-strong: rgba(232, 163, 61, 0.26);
+    --paper: #eef3f4;
+    --paper-dim: #a9bcc2;
+    --amber: #e8a33d;
+    --amber-dim: #a97a34;
+    --ok: #6fbf9e;
+    --err: #d97066;
+    --panel: #142a35;
+    --panel-border: rgba(238, 243, 244, 0.12);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background-color: var(--blueprint);
+    background-image:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+      linear-gradient(var(--grid-line-strong) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line-strong) 1px, transparent 1px);
+    background-size: 20px 20px, 20px 20px, 100px 100px, 100px 100px;
+    color: var(--paper);
+    font-family: 'IBM Plex Sans', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 48px 20px 80px;
+  }
+
+  .eyebrow {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    color: var(--amber);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  h1 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 600;
+    font-size: clamp(32px, 6vw, 52px);
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+    color: var(--paper);
+  }
+
+  h1 span { color: var(--amber); }
+
+  .sub {
+    color: var(--paper-dim);
+    font-size: 15px;
+    max-width: 480px;
+    text-align: center;
+    line-height: 1.5;
+    margin-bottom: 44px;
+  }
+
+  .sheet {
+    width: 100%;
+    max-width: 560px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 28px;
+    position: relative;
+  }
+
+  .sheet::before {
+    content: "SPEC-01";
+    position: absolute;
+    top: -1px;
+    right: -1px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: var(--blueprint-deep);
+    background: var(--amber);
+    padding: 3px 8px;
+    border-radius: 0 4px 0 4px;
+  }
+
+  .dropzone {
+    border: 1.5px dashed var(--amber-dim);
+    border-radius: 3px;
+    padding: 36px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .dropzone.drag {
+    border-color: var(--amber);
+    background: rgba(232, 163, 61, 0.06);
+  }
+
+  .dropzone input { display: none; }
+
+  .dz-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    color: var(--paper-dim);
+    letter-spacing: 0.02em;
+  }
+
+  .dz-filename {
+    margin-top: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px;
+    color: var(--paper);
+    word-break: break-all;
+  }
+
+  .conversion-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin: 26px 0;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  .fmt-badge {
+    border: 1px solid var(--panel-border);
+    background: var(--blueprint-deep);
+    color: var(--paper-dim);
+    font-size: 13px;
+    padding: 8px 14px;
+    border-radius: 3px;
+    min-width: 64px;
+    text-align: center;
+  }
+
+  .fmt-badge.active {
+    color: var(--amber);
+    border-color: var(--amber-dim);
+  }
+
+  .arrow {
+    color: var(--amber-dim);
+    font-size: 16px;
+  }
+
+  select {
+    appearance: none;
+    background: var(--blueprint-deep);
+    border: 1px solid var(--amber-dim);
+    color: var(--amber);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    padding: 8px 30px 8px 14px;
+    border-radius: 3px;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23e8a33d'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+  }
+
+  button.go {
+    width: 100%;
+    margin-top: 10px;
+    background: var(--amber);
+    color: var(--blueprint-deep);
+    border: none;
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: 0.03em;
+    padding: 13px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background-color 0.15s ease, opacity 0.15s ease;
+  }
+
+  button.go:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  button.go:not(:disabled):hover {
+    background: #f0b256;
+  }
+
+  .status {
+    margin-top: 16px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    text-align: center;
+    min-height: 18px;
+  }
+
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--err); }
+
+  .status a {
+    color: var(--ok);
+    text-decoration: underline;
+  }
+
+  footer {
+    margin-top: 40px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--amber-dim);
+    letter-spacing: 0.06em;
+  }
+</style>
+</head>
+<body>
+
+  <div class="eyebrow">flex // format converter</div>
+  <h1>File in. <span>File out.</span></h1>
+  <p class="sub">Drop a file, pick a target format, get the converted result back. No accounts, nothing kept.</p>
+
+  <div class="sheet">
+    <div class="dropzone" id="dropzone">
+      <input type="file" id="fileInput">
+      <div class="dz-label" id="dzLabel">drag a file here, or click to browse</div>
+      <div class="dz-filename" id="dzFilename"></div>
+    </div>
+
+    <div class="conversion-row">
+      <div class="fmt-badge active" id="srcBadge">—</div>
+      <div class="arrow">→</div>
+      <select id="targetFormat">
+        <option value="ico">ICO</option>
+        <option value="png">PNG</option>
+        <option value="jpg">JPG</option>
+        <option value="webp">WEBP</option>
+        <option value="gif">GIF</option>
+        <option value="bmp">BMP</option>
+      </select>
+    </div>
+
+    <button class="go" id="convertBtn" disabled>CONVERT</button>
+    <div class="status" id="status"></div>
+  </div>
+
+  <footer>FLEX-CONVERT-CLI · v1</footer>
+
+<script>
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const dzLabel = document.getElementById('dzLabel');
+  const dzFilename = document.getElementById('dzFilename');
+  const srcBadge = document.getElementById('srcBadge');
+  const targetFormat = document.getElementById('targetFormat');
+  const convertBtn = document.getElementById('convertBtn');
+  const status = document.getElementById('status');
+
+  let selectedFile = null;
+
+  function setFile(file) {
+    selectedFile = file;
+    const ext = (file.name.split('.').pop() || '?').toUpperCase();
+    srcBadge.textContent = ext;
+    dzFilename.textContent = file.name;
+    dzLabel.textContent = 'file selected — click to change';
+    convertBtn.disabled = false;
+    status.textContent = '';
+    status.className = 'status';
+  }
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files[0]) setFile(e.target.files[0]);
+  });
+
+  ['dragenter', 'dragover'].forEach(evt =>
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.add('drag');
+    })
+  );
+  ['dragleave', 'drop'].forEach(evt =>
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('drag');
+    })
+  );
+  dropzone.addEventListener('drop', (e) => {
+    if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+  });
+
+  convertBtn.addEventListener('click', async () => {
+    if (!selectedFile) return;
+    convertBtn.disabled = true;
+    convertBtn.textContent = 'CONVERTING…';
+    status.className = 'status';
+    status.textContent = '';
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+
+    try {
+      const res = await fetch(`/convert?to=${targetFormat.value}`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `request failed (${res.status})`);
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const base = selectedFile.name.replace(/\.[^/.]+$/, '');
+      const outName = `${base}.${targetFormat.value.toLowerCase()}`;
+
+      status.className = 'status ok';
+      status.innerHTML = `done — <a href="${url}" download="${outName}">download ${outName}</a>`;
+    } catch (err) {
+      status.className = 'status err';
+      status.textContent = err.message;
+    } finally {
+      convertBtn.disabled = false;
+      convertBtn.textContent = 'CONVERT';
+    }
+  });
+</script>
+
+</body>
+</html>
