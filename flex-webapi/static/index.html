@@ -8,229 +8,229 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --blueprint: #10222c;
-    --blueprint-deep: #0a1922;
-    --grid-line: rgba(232, 163, 61, 0.14);
-    --grid-line-strong: rgba(232, 163, 61, 0.26);
-    --paper: #eef3f4;
-    --paper-dim: #a9bcc2;
-    --amber: #e8a33d;
-    --amber-dim: #a97a34;
-    --ok: #6fbf9e;
-    --err: #d97066;
-    --panel: #142a35;
-    --panel-border: rgba(238, 243, 244, 0.12);
+    --bg-base: #000000;
+    --panel-bg: #0a0a0a;
+    --panel-border: #222222;
+    --text-main: #ededed;
+    --text-muted: #888888;
+    --accent: #0070f3;
+    --accent-hover: #3291ff;
+    --accent-muted: rgba(0, 112, 243, 0.1);
+    --ok: #10b981;
+    --err: #ef4444;
+    --radius: 12px;
   }
 
   * { box-sizing: border-box; }
 
   body {
     margin: 0;
-    background-color: var(--blueprint);
-    background-image:
-      linear-gradient(var(--grid-line) 1px, transparent 1px),
-      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
-      linear-gradient(var(--grid-line-strong) 1px, transparent 1px),
-      linear-gradient(90deg, var(--grid-line-strong) 1px, transparent 1px);
-    background-size: 20px 20px, 20px 20px, 100px 100px, 100px 100px;
-    color: var(--paper);
+    background-color: var(--bg-base);
+    /* Subtle radial glow at the top center */
+    background-image: radial-gradient(circle at 50% 0%, #1a1a1a 0%, transparent 70%);
+    color: var(--text-main);
     font-family: 'IBM Plex Sans', sans-serif;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 48px 20px 80px;
+    padding: 80px 20px 80px;
+    -webkit-font-smoothing: antialiased;
   }
 
   .eyebrow {
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 12px;
-    letter-spacing: 0.14em;
-    color: var(--amber);
+    font-size: 13px;
+    color: var(--text-muted);
     text-transform: uppercase;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
   }
 
   h1 {
-    font-family: 'IBM Plex Mono', monospace;
-    font-weight: 600;
-    font-size: clamp(32px, 6vw, 52px);
-    letter-spacing: -0.01em;
-    margin: 0 0 6px;
-    color: var(--paper);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 700;
+    font-size: clamp(36px, 6vw, 48px);
+    letter-spacing: -0.04em;
+    margin: 0 0 12px;
+    color: var(--text-main);
   }
 
-  h1 span { color: var(--amber); }
+  h1 span { 
+    color: var(--text-muted); 
+    font-weight: 500;
+  }
 
   .sub {
-    color: var(--paper-dim);
-    font-size: 15px;
+    color: var(--text-muted);
+    font-size: 16px;
     max-width: 480px;
     text-align: center;
-    line-height: 1.5;
-    margin-bottom: 44px;
+    line-height: 1.6;
+    margin-bottom: 48px;
   }
 
   .sheet {
     width: 100%;
-    max-width: 560px;
-    background: var(--panel);
+    max-width: 500px;
+    background: var(--panel-bg);
     border: 1px solid var(--panel-border);
-    border-radius: 4px;
-    padding: 28px;
-    position: relative;
-  }
-
-  .sheet::before {
-    content: "SPEC-01";
-    position: absolute;
-    top: -1px;
-    right: -1px;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    color: var(--blueprint-deep);
-    background: var(--amber);
-    padding: 3px 8px;
-    border-radius: 0 4px 0 4px;
+    border-radius: var(--radius);
+    padding: 32px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
   }
 
   .dropzone {
-    border: 1.5px dashed var(--amber-dim);
-    border-radius: 3px;
-    padding: 36px 20px;
+    border: 1px dashed var(--panel-border);
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 8px;
+    padding: 40px 20px;
     text-align: center;
     cursor: pointer;
-    transition: border-color 0.15s ease, background-color 0.15s ease;
+    transition: all 0.2s ease;
   }
 
-  .dropzone.drag {
-    border-color: var(--amber);
-    background: rgba(232, 163, 61, 0.06);
+  .dropzone:hover, .dropzone.drag {
+    border-color: var(--accent);
+    background: var(--accent-muted);
   }
 
   .dropzone input { display: none; }
 
   .dz-label {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 13px;
-    color: var(--paper-dim);
-    letter-spacing: 0.02em;
+    font-size: 14px;
+    color: var(--text-muted);
+    font-weight: 500;
   }
 
   .dz-filename {
-    margin-top: 10px;
+    margin-top: 12px;
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 14px;
-    color: var(--paper);
+    font-size: 13px;
+    color: var(--accent);
     word-break: break-all;
   }
 
+  /* Vertical distance between input / output extension boxes and the convert + input areas */
   .conversion-row {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 14px;
-    margin: 26px 0;
-    font-family: 'IBM Plex Mono', monospace;
+    gap: 16px;
+    margin: 32px 0;
   }
 
+  /* Input extension box */
   .fmt-badge {
     border: 1px solid var(--panel-border);
-    background: var(--blueprint-deep);
-    color: var(--paper-dim);
+    background: var(--bg-base);
+    color: var(--text-muted);
+    font-family: 'IBM Plex Mono', monospace;
     font-size: 13px;
-    padding: 8px 14px;
-    border-radius: 3px;
-    min-width: 64px;
+    font-weight: 600;
+    padding: 10px 16px;
+    border-radius: 6px;
+    min-width: 70px;
     text-align: center;
+    transition: color 0.2s, border-color 0.2s;
   }
 
   .fmt-badge.active {
-    color: var(--amber);
-    border-color: var(--amber-dim);
+    color: var(--text-main);
+    border-color: var(--text-muted);
   }
 
   .arrow {
-    color: var(--amber-dim);
-    font-size: 16px;
+    color: var(--panel-border);
+    font-size: 18px;
   }
 
+  /* Output extension box */
   select {
     appearance: none;
-    background: var(--blueprint-deep);
-    border: 1px solid var(--amber-dim);
-    color: var(--amber);
+    background: var(--bg-base);
+    border: 1px solid var(--panel-border);
+    color: var(--text-main);
     font-family: 'IBM Plex Mono', monospace;
+    font-weight: 600;
     font-size: 13px;
-    padding: 8px 30px 8px 14px;
-    border-radius: 3px;
+    padding: 10px 36px 10px 16px;
+    border-radius: 6px;
     cursor: pointer;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23e8a33d'/%3E%3C/svg%3E");
+    /* Electric blue encoded SVG arrow */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%230070f3'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
-    background-position: right 12px center;
+    background-position: right 14px center;
+    transition: border-color 0.2s;
+  }
+  
+  select:hover, select:focus {
+    border-color: var(--accent);
+    outline: none;
   }
 
   button.go {
     width: 100%;
-    margin-top: 10px;
-    background: var(--amber);
-    color: var(--blueprint-deep);
+    margin-top: 8px;
+    background: var(--text-main);
+    color: var(--bg-base);
     border: none;
-    font-family: 'IBM Plex Mono', monospace;
     font-weight: 600;
-    font-size: 14px;
-    letter-spacing: 0.03em;
-    padding: 13px;
-    border-radius: 3px;
+    font-size: 15px;
+    padding: 14px;
+    border-radius: 6px;
     cursor: pointer;
-    transition: background-color 0.15s ease, opacity 0.15s ease;
+    transition: all 0.2s ease;
   }
 
   button.go:disabled {
-    opacity: 0.4;
+    background: var(--panel-border);
+    color: var(--text-muted);
     cursor: not-allowed;
   }
 
   button.go:not(:disabled):hover {
-    background: #f0b256;
+    background: #ffffff;
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.2);
   }
 
   .status {
-    margin-top: 16px;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 13px;
+    margin-top: 20px;
+    font-size: 14px;
     text-align: center;
-    min-height: 18px;
+    min-height: 20px;
   }
 
   .status.ok { color: var(--ok); }
   .status.err { color: var(--err); }
 
   .status a {
-    color: var(--ok);
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+  }
+  
+  .status a:hover {
     text-decoration: underline;
   }
 
   footer {
-    margin-top: 40px;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 11px;
-    color: var(--amber-dim);
-    letter-spacing: 0.06em;
+    margin-top: 60px;
+    font-size: 12px;
+    color: var(--panel-border);
   }
 </style>
+
 </head>
 <body>
 
-  <div class="eyebrow">flex // format converter</div>
+  <div class="eyebrow">FLEX Image Converter</div>
   <h1>File in. <span>File out.</span></h1>
-  <p class="sub">Drop a file, pick a target format, get the converted result back. No accounts, nothing kept.</p>
+  <p class="sub">Drop a file, pick a target format, get results back. No accounts, nothing kept.</p>
 
   <div class="sheet">
     <div class="dropzone" id="dropzone">
       <input type="file" id="fileInput">
-      <div class="dz-label" id="dzLabel">drag a file here, or click to browse</div>
+      <div class="dz-label" id="dzLabel">Drag a file here or select your file</div>
       <div class="dz-filename" id="dzFilename"></div>
     </div>
 
@@ -238,12 +238,18 @@
       <div class="fmt-badge active" id="srcBadge">—</div>
       <div class="arrow">→</div>
       <select id="targetFormat">
-        <option value="ico">ICO</option>
         <option value="png">PNG</option>
+        <option value="jpeg">JPEG</option>
         <option value="jpg">JPG</option>
-        <option value="webp">WEBP</option>
-        <option value="gif">GIF</option>
+        <option value="ico">ICO</option>
+        <option value="jifi">JIFI</option>
+        <option value="pbm">PBM</option>
+        <option value="pgm">PGM</option>
+        <option value="ppm">PPM</option>
         <option value="bmp">BMP</option>
+        <option value="cur">CUR</option>
+        <option value="xmb">XMB</option>
+        <option value="xpm">XPM</option>
       </select>
     </div>
 
@@ -251,7 +257,7 @@
     <div class="status" id="status"></div>
   </div>
 
-  <footer>FLEX-CONVERT-CLI · v1</footer>
+  <footer>FLEX WEB · v1</footer>
 
 <script>
   const dropzone = document.getElementById('dropzone');
@@ -262,18 +268,33 @@
   const targetFormat = document.getElementById('targetFormat');
   const convertBtn = document.getElementById('convertBtn');
   const status = document.getElementById('status');
+  const supportedExt = new Set(["png", "jpeg", "jpg", "ico", "jifi", "pbm", "pgm", "ppm", "bmp", "cur",
+                      "xmb", "xpm"])
 
   let selectedFile = null;
 
   function setFile(file) {
     selectedFile = file;
-    const ext = (file.name.split('.').pop() || '?').toUpperCase();
-    srcBadge.textContent = ext;
+    const ext = file.name.includes(".") ? file.name.split(".").pop().toLowerCase() : "";
+    const validExt = supportedExt.has(ext);
+    if (!validExt) {
+      srcBadge.textContent = "?";
+      dzFilename.textContent = "";
+      dzLabel.textContent = "Unsupported file format";
+      convertBtn.disabled = true;
+      status.textContent =
+        `Unsupported file: "${file.name}"` +
+        (ext ? ` (${ext})` : "");
+      status.className = "status error";
+      selectedFile = null;
+      return;
+    }
+    srcBadge.textContent = ext.toUpperCase();
     dzFilename.textContent = file.name;
-    dzLabel.textContent = 'file selected — click to change';
+    dzLabel.textContent = "File selected — click to change";
     convertBtn.disabled = false;
-    status.textContent = '';
-    status.className = 'status';
+    status.textContent = "";
+    status.className = "status";
   }
 
   dropzone.addEventListener('click', () => fileInput.click());
