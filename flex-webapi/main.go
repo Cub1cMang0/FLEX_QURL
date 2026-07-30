@@ -85,6 +85,7 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 		prefsJSON = "{}"
 	}
 	// Construct command to run FLEX
+	log.Printf("%s", prefsJSON)
 	cmd := exec.CommandContext(ctx, cliPath, inputPath, outDir, outputExt, prefsJSON)
 	cliOutput, err := cmd.CombinedOutput()
 	if err != nil {

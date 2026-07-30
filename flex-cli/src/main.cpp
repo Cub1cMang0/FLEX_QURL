@@ -4,7 +4,6 @@
 
 #include <QGuiApplication>
 #include <QFileInfo>
-#include <QDebug>
 #include "mainimageconverter.h"
 #include "json.hpp"
 
@@ -18,7 +17,7 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
 
     // Check for correct input count
-    if (argc < 4)
+    if (argc < 5)
     {
         qCritical().noquote() << "Usage: flex-convert-cli <input_file> <output_dir> <output_ext>";
         return 1;
@@ -29,7 +28,7 @@ int main(int argc, char *argv[])
     QString output_dir  = argv[2];
     QString output_ext  = argv[3];
     QString input_ext   = QFileInfo(input_path).suffix();
-    json load_data      = argv[4];
+    json load_data      = json::parse(argv[4]);
 
     bool ok = false;
     QString resultMessage;
