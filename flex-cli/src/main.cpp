@@ -4,6 +4,7 @@
 
 #include <QGuiApplication>
 #include <QFileInfo>
+#include <QDebug>
 #include "mainimageconverter.h"
 #include "json.hpp"
 
