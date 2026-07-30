@@ -17,7 +17,7 @@ MainImageConverter::MainImageConverter(QObject *parent)
     : ImageFileConverter(), QObject(parent) {}
 
 // Main image conversion logic
-void MainImageConverter::convert_image(const QString &input_path, const QString &output_path, const QString &input_ext, const QString &output_ext)
+void MainImageConverter::convert_image(const QString &input_path, const QString &output_path, const QString &input_ext, const QString &output_ext, const json &load_data)
 {
     // Extract input file info
     QFileInfo input_file_info(input_path);
@@ -50,15 +50,9 @@ void MainImageConverter::convert_image(const QString &input_path, const QString 
         emit update_image_progress(error, false);
         return;
     }
-    // Build and define configuration file directory (conversion_preferences.json)
-    QString config_dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-    // Define full config file path
-    QString json_path = config_dir + "/conversion_preferences.json";
-    // Attempt to fetch config file
-    ifstream save_json(json_path.toStdString());
     int image_quality = -1;
     // Check if config file even exists
-    if (!save_json.is_open())
+    if (load_data.isNull())
     {
         // Define ImageWriter
         QImageWriter writer(complete_output);
@@ -76,12 +70,6 @@ void MainImageConverter::convert_image(const QString &input_path, const QString 
     }
     else
     {
-        // Declare json object to store our conversion config file
-        json load_data;
-        // Move said config data to actual json object
-        save_json >> load_data;
-        // Finally close the ifstream 
-        save_json.close();
         // Check if the user has conversion preferences for images
         if (load_data.contains("image"))
         {

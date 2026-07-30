@@ -218,6 +218,96 @@
     font-size: 12px;
     color: var(--panel-border);
   }
+
+  /* Add input[type="number"] to your existing select styles */
+  select, input[type="number"] {
+    appearance: none;
+    background: var(--bg-base);
+    border: 1px solid var(--panel-border);
+    color: var(--text-main);
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 600;
+    font-size: 13px;
+    padding: 10px 14px;
+    border-radius: 6px;
+    transition: border-color 0.2s;
+  }
+
+  select:disabled, input[type="number"]:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* Custom Preferences UI */
+  .prefs-section {
+    border-top: 1px solid var(--panel-border);
+    padding-top: 24px;
+    margin-bottom: 24px;
+  }
+
+  .prefs-title {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 16px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  .pref-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    font-size: 14px;
+    color: var(--text-main);
+  }
+
+  .pref-row label {
+    color: var(--text-muted);
+  }
+
+  .input-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  input[type="number"] {
+    width: 70px;
+    text-align: center;
+  }
+
+  /* Custom Checkbox Design */
+  input[type="checkbox"] {
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    background: var(--bg-base);
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s;
+  }
+
+  input[type="checkbox"]:checked {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  input[type="checkbox"]:checked::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 7px;
+    width: 4px;
+    height: 9px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+
 </style>
 
 </head>
@@ -253,6 +343,55 @@
       </select>
     </div>
 
+      <!-- Conversion Preferences Panel -->
+    <div class="prefs-section">
+      <div class="prefs-title">Conversion Preferences</div>
+      
+      <div class="pref-row">
+        <label for="prefAspectRatio">Aspect Ratio:</label>
+        <select id="prefAspectRatio" style="width: 170px;">
+          <option value="Keep Aspect Ratio">Keep Aspect Ratio</option>
+          <option value="1 : 1">1:1</option>
+          <option value="3 : 2">3:2</option>
+          <option value="4 : 3">4:3</option>
+          <option value="5 : 4">5:4</option>
+          <option value="16 : 9">16:9</option>
+          <option value="16 : 10">16:10</option>
+        </select>
+      </div>
+
+      <div class="pref-row">
+        <label for="prefQualityCb">Quality:</label>
+        <div class="input-group">
+          <input type="number" id="prefQualityVal" min="1" max="100" value="100" disabled>
+          <input type="checkbox" id="prefQualityCb">
+        </div>
+      </div>
+
+      <div class="pref-row">
+        <label for="prefGrayscale">Gray Scale</label>
+        <input type="checkbox" id="prefGrayscale">
+      </div>
+
+      <div class="pref-row">
+        <label for="prefAlpha">Remove Alpha</label>
+        <input type="checkbox" id="prefAlpha">
+      </div>
+
+      <div class="pref-row">
+        <label for="prefBitDepthCb">Bit Depth</label>
+        <div class="input-group">
+          <select id="prefBitDepthVal" style="width: 70px;" disabled>
+            <option value="1">1</option>
+            <option value="8">8</option>
+            <option value="24">24</option>
+            <option value="32">32</option>
+          </select>
+          <input type="checkbox" id="prefBitDepthCb">
+        </div>
+      </div>
+    </div>
+
     <button class="go" id="convertBtn" disabled>CONVERT</button>
     <div class="status" id="status"></div>
   </div>
@@ -270,6 +409,10 @@
   const status = document.getElementById('status');
   const supportedExt = new Set(["png", "jpeg", "jpg", "ico", "jifi", "pbm", "pgm", "ppm", "bmp", "cur",
                       "xmb", "xpm"])
+  const prefQualityCb = document.getElementById('prefQualityCb');
+  const prefQualityVal = document.getElementById('prefQualityVal');
+  const prefBitDepthCb = document.getElementById('prefBitDepthCb');
+  const prefBitDepthVal = document.getElementById('prefBitDepthVal');
 
   let selectedFile = null;
 
@@ -318,6 +461,16 @@
     if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
   });
 
+  // Toggle inputs when checkboxes are clicked
+  prefQualityCb.addEventListener('change', (e) => {
+    prefQualityVal.disabled = !e.target.checked;
+  });
+
+  prefBitDepthCb.addEventListener('change', (e) => {
+    prefBitDepthVal.disabled = !e.target.checked;
+  });
+
+
   convertBtn.addEventListener('click', async () => {
     if (!selectedFile) return;
     convertBtn.disabled = true;
@@ -327,6 +480,30 @@
 
     const formData = new FormData();
     formData.append('file', selectedFile);
+
+    // Build JSON exactly like the C++ code expects: [bool, "value"] or [bool]
+    const prefs = { image: {} };
+    const arSelect = document.getElementById('prefAspectRatio').value;
+    if (arSelect === "Keep Aspect Ratio") {
+        prefs.image.aspect_ratio = [false, "None"];
+    } else {
+        prefs.image.aspect_ratio = [true, arSelect];
+    }
+    if (!prefQualityCb.checked) {
+        prefs.image.quality = [false, "None"];
+    } else {
+        prefs.image.quality = [true, prefQualityVal.value];
+    }
+    prefs.image.grayscale = [document.getElementById('prefGrayscale').checked];
+    prefs.image.alpha = [document.getElementById('prefAlpha').checked];
+
+    if (!prefBitDepthCb.checked) {
+        prefs.image.bitdepth = [false, "None"];
+    } else {
+        prefs.image.bitdepth = [true, prefBitDepthVal.value];
+    }
+    // Append the compiled JSON string to be grabbed by the Go backend
+    formData.append('preferences', JSON.stringify(prefs));
 
     try {
       const res = await fetch(`/convert?to=${targetFormat.value}`, {

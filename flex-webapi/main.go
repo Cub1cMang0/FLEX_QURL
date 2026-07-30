@@ -80,8 +80,12 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 	// flex-convert-cli hangs, this request fails instead of hanging forever.
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
+	prefsJSON := r.FormValue("preferences")
+	if prefsJSON == "" {
+		prefsJSON = "{}"
+	}
 	// Construct command to run FLEX
-	cmd := exec.CommandContext(ctx, cliPath, inputPath, outDir, outputExt)
+	cmd := exec.CommandContext(ctx, cliPath, inputPath, outDir, outputExt, prefsJSON)
 	cliOutput, err := cmd.CombinedOutput()
 	if err != nil {
 		// Set error if command construction fails
