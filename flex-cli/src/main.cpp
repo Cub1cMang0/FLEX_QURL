@@ -6,6 +6,9 @@
 #include <QFileInfo>
 #include <QDebug>
 #include "mainimageconverter.h"
+#include "json.hpp"
+
+using json = nlohmann::json;
 
 int main(int argc, char *argv[])
 {
@@ -26,6 +29,7 @@ int main(int argc, char *argv[])
     QString output_dir  = argv[2];
     QString output_ext  = argv[3];
     QString input_ext   = QFileInfo(input_path).suffix();
+    json load_data      = argv[4];
 
     bool ok = false;
     QString resultMessage;
@@ -41,7 +45,7 @@ int main(int argc, char *argv[])
         });
     
     // Convert image
-    converter.convert_image(input_path, output_dir, input_ext, output_ext);
+    converter.convert_image(input_path, output_dir, input_ext, output_ext, load_data);
 
     
     qInfo().noquote() << resultMessage;

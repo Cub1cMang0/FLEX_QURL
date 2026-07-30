@@ -52,7 +52,7 @@ void MainImageConverter::convert_image(const QString &input_path, const QString 
     }
     int image_quality = -1;
     // Check if config file even exists
-    if (load_data.isNull())
+    if (load_data.is_null())
     {
         // Define ImageWriter
         QImageWriter writer(complete_output);
