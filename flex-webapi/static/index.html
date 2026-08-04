@@ -332,13 +332,13 @@
         <option value="jpeg">JPEG</option>
         <option value="jpg">JPG</option>
         <option value="ico">ICO</option>
-        <option value="jifi">JIFI</option>
+        <option value="jfif">JFIF</option>
         <option value="pbm">PBM</option>
         <option value="pgm">PGM</option>
         <option value="ppm">PPM</option>
         <option value="bmp">BMP</option>
         <option value="cur">CUR</option>
-        <option value="xmb">XMB</option>
+        <option value="xbm">XBM</option>
         <option value="xpm">XPM</option>
       </select>
     </div>
@@ -407,7 +407,7 @@
   const targetFormat = document.getElementById('targetFormat');
   const convertBtn = document.getElementById('convertBtn');
   const status = document.getElementById('status');
-  const supportedExt = new Set(["png", "jpeg", "jpg", "ico", "jifi", "pbm", "pgm", "ppm", "bmp", "cur",
+  const supportedExt = new Set(["png", "jpeg", "jpg", "ico", "jfif", "pbm", "pgm", "ppm", "bmp", "cur",
                       "xmb", "xpm"])
   const prefQualityCb = document.getElementById('prefQualityCb');
   const prefQualityVal = document.getElementById('prefQualityVal');
@@ -515,14 +515,12 @@
         const text = await res.text();
         throw new Error(text || `request failed (${res.status})`);
       }
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const base = selectedFile.name.replace(/\.[^/.]+$/, '');
-      const outName = `${base}.${targetFormat.value.toLowerCase()}`;
-
+      // Parse the JSON response
+      const data = await res.json();
+      // Set status
       status.className = 'status ok';
-      status.innerHTML = `done — <a href="${url}" download="${outName}">download ${outName}</a>`;
+      // Render a clean, clickable link pointing to the viewer service
+      status.innerHTML = `conversion complete — <a href="http://localhost:8081/view?job=${data.job_id}">view image</a>`;
     } catch (err) {
       status.className = 'status err';
       status.textContent = err.message;

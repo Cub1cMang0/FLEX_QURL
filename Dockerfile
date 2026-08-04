@@ -29,6 +29,10 @@ WORKDIR /build/flex-webapi
 RUN go mod download
 RUN go build -o flex-web-api main.go
 
+WORKDIR /build/flex-image-viewer
+RUN go mod download
+RUN go build -o flex-image-viewer main.go
+
 # ==========================================
 # STAGE 2: Runner
 # ==========================================
@@ -44,6 +48,7 @@ WORKDIR /app
 
 # Copy the compiled Go web API from the builder stage
 COPY --from=builder /build/flex-webapi/flex-web-api .
+COPY --from=builder /build/flex-image-viewer/flex-image-viewer .
 
 # Copy the compiled C++ CLI from the builder stage
 # (This ensures it sits right next to the Go binary, matching your cliPath = "./flex-convert-cli")
@@ -52,8 +57,14 @@ COPY --from=builder /build/flex-cli/build/flex-convert-cli .
 # Copy your frontend static files
 COPY --from=builder /build/flex-webapi/static ./static
 
-# Expose port 8080 to the cloud provider
-EXPOSE 8080
+# Ensure persistent job store directory
+
+# Expose port 8080 and 8081 to the cloud provider
+EXPOSE 8080 8081
+
+# Create miniscript to start both services
+RUN echo -e '#!/bin/sh\n./flex-image-viewer &\n./flex-web-api' > start.sh && \
+    chmod +x start.sh
 
 # Start the Go server
-CMD ["./flex-web-api"]
+CMD ["./start.sh"]
