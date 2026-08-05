@@ -14,7 +14,7 @@ struct ImageFormatCapabilities
 };
 
 // inline const to map out each image format and their capabilities 
-// for better searching / indexing
+// for better searching / indexing in mainimageconverter.cpp
 inline const QMap<QString, ImageFormatCapabilities> image_capabilities =
     {
         {"png",  {true, true, true, true}},

@@ -308,6 +308,41 @@
     transform: rotate(45deg);
   }
 
+  /* Custom Tooltip Styling */
+  .tooltip-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    cursor: help;
+    border-bottom: 1px dotted var(--text-muted);
+  }
+
+  .tooltip-wrap::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    transform: translateY(-8px);
+    background: #1a1a1a;
+    color: var(--text-main);
+    border: 1px solid var(--panel-border);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    z-index: 10;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  }
+
+  .tooltip-wrap:hover::after {
+    opacity: 1;
+    transform: translateY(-4px);
+  }
+
 </style>
 
 </head>
@@ -346,9 +381,10 @@
       <!-- Conversion Preferences Panel -->
     <div class="prefs-section">
       <div class="prefs-title">Conversion Preferences</div>
-      
       <div class="pref-row">
-        <label for="prefAspectRatio">Aspect Ratio:</label>
+        <label for="prefAspectRatio">
+        <span class="tooltip-wrap" data-tooltip="Applies to: All">Aspect Ratio:</span>
+        </label>
         <select id="prefAspectRatio" style="width: 170px;">
           <option value="Keep Aspect Ratio">Keep Aspect Ratio</option>
           <option value="1 : 1">1:1</option>
@@ -361,7 +397,9 @@
       </div>
 
       <div class="pref-row">
-        <label for="prefQualityCb">Quality:</label>
+        <label for="prefQualityCb">
+          <span class="tooltip-wrap" data-tooltip="Applies to: PNG, JPG, JPEG, JFIF">Quality:</span>
+        </label>
         <div class="input-group">
           <input type="number" id="prefQualityVal" min="1" max="100" value="100" disabled>
           <input type="checkbox" id="prefQualityCb">
@@ -369,17 +407,23 @@
       </div>
 
       <div class="pref-row">
-        <label for="prefGrayscale">Gray Scale</label>
+        <label for="prefGrayscale">
+          <span class="tooltip-wrap" data-tooltip="Applies to: PNG, JPG, JPEG, ICO, JFIF, PGM, BMP, CUR, XPM">Gray Scale</span>
+        </label>
         <input type="checkbox" id="prefGrayscale">
       </div>
 
       <div class="pref-row">
-        <label for="prefAlpha">Remove Alpha</label>
+        <label for="prefAlpha">
+          <span class="tooltip-wrap" data-tooltip="Applies to: PNG, ICO, CUR, XPM">Remove Alpha</span>
+        </label>
         <input type="checkbox" id="prefAlpha">
       </div>
 
       <div class="pref-row">
-        <label for="prefBitDepthCb">Bit Depth</label>
+        <label for="prefBitDepthCb">
+        <span class="tooltip-wrap" data-tooltip="Applies to: PNG, ICO, BMP, CUR">Bit Depth</span>
+        </label>
         <div class="input-group">
           <select id="prefBitDepthVal" style="width: 70px;" disabled>
             <option value="1">1</option>

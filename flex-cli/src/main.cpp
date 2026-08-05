@@ -29,6 +29,8 @@ int main(int argc, char *argv[])
     QString output_ext  = argv[3];
     QString input_ext   = QFileInfo(input_path).suffix();
     json load_data      = json::object();
+
+    // Check if conversion preferences are passed in as an argument to extract for mainimageconverter.cpp
     if (argc >= 5)
     {
         try {
@@ -53,8 +55,7 @@ int main(int argc, char *argv[])
     
     // Convert image
     converter.convert_image(input_path, output_dir, input_ext, output_ext, load_data);
-
-    
+    // Output the result message into the terminal (useful for debugging)
     qInfo().noquote() << resultMessage;
     return ok ? 0 : 1;
 }

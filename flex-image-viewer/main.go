@@ -30,7 +30,7 @@ func viewHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Serve a minimal HTML page with the embedded image
-	html := fmt.Sprintf(`<!DOCTYPE html>
+html := fmt.Sprintf(`<!DOCTYPE html>
 	<html lang="en">
 	<head>
 	<meta charset="UTF-8">
@@ -58,6 +58,22 @@ func viewHandler(w http.ResponseWriter, r *http.Request) {
 		margin-bottom: 24px;
 		letter-spacing: 0.1em;
 	}
+	.download-btn {
+		display: inline-block;
+		margin-bottom: 24px;
+		background: #0070f3;
+		color: #ffffff;
+		text-decoration: none;
+		padding: 12px 24px;
+		border-radius: 6px;
+		font-family: 'IBM Plex Mono', monospace;
+		font-size: 14px;
+		font-weight: 600;
+		transition: background 0.2s;
+	}
+	.download-btn:hover {
+		background: #3291ff;
+	}
 	.viewer-box {
 		background: #0a0a0a;
 		border: 1px solid #222222;
@@ -76,11 +92,15 @@ func viewHandler(w http.ResponseWriter, r *http.Request) {
 	</head>
 	<body>
 	<div class="eyebrow">Zero-Trust Image Viewer</div>
+	
+	<!-- NEW: Download Button pointing to the raw handler with a dl=true flag -->
+	<a href="/raw?job=%s&dl=true" class="download-btn">DOWNLOAD ORIGINAL</a>
+	
 	<div class="viewer-box">
 		<img src="/raw?job=%s" alt="Converted Document">
 	</div>
 	</body>
-	</html>`, jobID)
+	</html>`, jobID, jobID)
 
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(html))
@@ -97,15 +117,26 @@ func rawHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "job not found", http.StatusNotFound)
 		return
 	}
-	var targetFile string
+	var originalFile string
+	var pngFile string
 	for _, f := range files {
-		// Ignore the JSON prefs file and the temporary transcode file
-		if filepath.Ext(f.Name()) != ".json" && f.Name() != "web_view.png" {
-			targetFile = f.Name()
+		// Ignore the JSON prefs file
+		if filepath.Ext(f.Name()) == ".json" {
+			continue
+		}
+		// Categorize the files we find
+		if strings.ToLower(filepath.Ext(f.Name())) == ".png" {
+			pngFile = f.Name()
+		} else {
+			originalFile = f.Name()
 		}
 	}
+	// Used to determine whether or not the user converted to a non natively supported extension or just a png
+	targetFile := originalFile
 	if targetFile == "" {
-		// Set error when converted file isn't found in the job_store directory
+		targetFile = pngFile
+	}
+	if targetFile == "" {
 		http.Error(w, "no image found in job store", http.StatusNotFound)
 		return
 	}
@@ -113,6 +144,13 @@ func rawHandler(w http.ResponseWriter, r *http.Request) {
 	ext := strings.ToLower(filepath.Ext(targetFile))
 	// Construct full file path
 	fullPath := filepath.Join(workDir, targetFile)
+	// Used to download the converted image output
+	if r.URL.Query().Get("dl") == "true" {
+		// Force the browser to download the file instead of displaying it
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, targetFile))
+		http.ServeFile(w, r, fullPath)
+		return
+	}
 	// If the browser can render it natively, serve it directly
 	if webSafeFormats[ext] {
 		http.ServeFile(w, r, fullPath)
