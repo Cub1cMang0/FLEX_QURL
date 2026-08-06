@@ -18,10 +18,10 @@ import (
 
 
 // Define cli executable location
-const cliPath = "./flex-convert-cli"
+var cliPath = "./flex-convert-cli"
 
 // Define the location to store converted image jobs
-const jobPath = "./job_store"
+var jobPath = "./job_store"
 
 func convertHandler(w http.ResponseWriter, r *http.Request) {
 	// Ensure method is POST
