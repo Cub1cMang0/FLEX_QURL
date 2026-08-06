@@ -13,8 +13,8 @@ import (
 )
 
 // Point relatively to the API's workspace since it's in a different folder
-const jobStorePath = "./job_store"
-const cliPath = "./flex-convert-cli"
+var jobStorePath = "./job_store"
+var cliPath = "./flex-convert-cli"
 
 // A set of formats that modern web browsers is capable of natively displaying
 var webSafeFormats = map[string]bool{
@@ -30,7 +30,7 @@ func viewHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Serve a minimal HTML page with the embedded image
-html := fmt.Sprintf(`<!DOCTYPE html>
+	html := fmt.Sprintf(`<!DOCTYPE html>
 	<html lang="en">
 	<head>
 	<meta charset="UTF-8">
