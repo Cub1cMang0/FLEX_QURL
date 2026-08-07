@@ -42,63 +42,83 @@ import (
 var sampleCUR []byte
 
 func main() {
+	// Set up for testing
 	toFormat := flag.String("to", "xbm", "target conversion format")
 	cliPathFlag := flag.String("cli-path", "", "override path to flex-convert-cli")
 	timeout := flag.Duration("timeout", 30*time.Second, "overall timeout")
 	flag.Parse()
-
+	// Check for any errors when running test
 	if err := run(*toFormat, *cliPathFlag, *timeout); err != nil {
+		// Print error to console when any test fails w/ description of failure
 		fmt.Fprintf(os.Stderr, "\nSMOKE TEST FAILED: %v\n", err)
 		os.Exit(1)
 	}
+	// Print out success in console
 	fmt.Println("\nSMOKE TEST PASSED")
 }
 
 func run(toFormat, cliPathFlag string, timeout time.Duration) error {
+	// Fetch script path
 	scriptDir, err := os.Getwd()
 	if err != nil {
 		return err
 	}
+	// Set script directory
 	repoRoot := filepath.Dir(scriptDir) // scripts/ -> repo root
-
+	// Locate binaries step
 	step("Locating / building binaries")
+	// Fetch flex cli binary
 	cliBin, err := resolveCLI(repoRoot, cliPathFlag)
 	if err != nil {
 		return err
 	}
+	// Set Api bin
 	apiBin, err := buildGoBinary(filepath.Join(repoRoot, "flex-webapi"), "flex-web-api")
 	if err != nil {
 		return fmt.Errorf("building flex-web-api: %w", err)
 	}
+	// Set image viewer bin
 	viewerBin, err := buildGoBinary(filepath.Join(repoRoot, "flex-image-viewer"), "flex-image-viewer")
 	if err != nil {
 		return fmt.Errorf("building flex-image-viewer: %w", err)
 	}
 	ok("cli=%s\n         api=%s\n         viewer=%s", cliBin, apiBin, viewerBin)
-
+	// Set up isolated workspace step
 	step("Setting up an isolated workspace (temp job_store shared by both services)")
+	// Set up testing work directory
 	workDir, err := os.MkdirTemp("", "flex-smoke-*")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(workDir)
-
+	// Ensure copying flex cli directory works
 	if err := copyFile(cliBin, filepath.Join(workDir, "flex-convert-cli")); err != nil {
+		// Set error when this fails
 		return fmt.Errorf("staging CLI binary: %w", err)
 	}
+	// Set directory permissions
 	if err := os.Chmod(filepath.Join(workDir, "flex-convert-cli"), 0o755); err != nil {
+		// Return error when this fails
 		return err
 	}
+	// Ensure copying flex web api directory works
 	if err := copyFile(apiBin, filepath.Join(workDir, "flex-web-api")); err != nil {
+		// Return error when this fails
 		return err
 	}
+	// Set directory permissions
 	if err := os.Chmod(filepath.Join(workDir, "flex-web-api"), 0o755); err != nil {
+		// Return error when this fails
 		return err
 	}
+	// Ensure copying flex image viewer directory works
 	if err := copyFile(viewerBin, filepath.Join(workDir, "flex-image-viewer")); err != nil {
+		// Return error when this fails
 		return err
 	}
+	// Set directory permissions
 	if err := os.Chmod(filepath.Join(workDir, "flex-image-viewer"), 0o755); err != nil {
+		// Return error when this fails
 		return err
 	}
 	// The API serves ./static; harmless if empty, but stage it if present.
@@ -107,66 +127,85 @@ func run(toFormat, cliPathFlag string, timeout time.Duration) error {
 		_ = copyDir(staticSrc, filepath.Join(workDir, "static"))
 	}
 	ok("workspace: %s", workDir)
-
+	// Set up flex web api + image viewer step
 	step("Starting flex-web-api (:8080) and flex-image-viewer (:8081)")
+	// Set web api command (./flex-web-api)
 	apiCmd := exec.Command("./flex-web-api")
+	// Set api directory to working directory
 	apiCmd.Dir = workDir
+	// Set api directory env variable
 	apiCmd.Env = append(os.Environ(), "QT_QPA_PLATFORM=offscreen")
+	// Print out to console and errors too
 	apiCmd.Stdout = prefixWriter("  [api]    ")
 	apiCmd.Stderr = prefixWriter("  [api]    ")
+	// Ensure starting up flex-web-api works
 	if err := apiCmd.Start(); err != nil {
+		// Return error when this fails
 		return fmt.Errorf("starting flex-web-api: %w", err)
 	}
 	defer func() { _ = apiCmd.Process.Kill() }()
-
+	// Set viewer command (./flex-image-viewer)
 	viewerCmd := exec.Command("./flex-image-viewer")
+	// Set image viewer directory to working directory
 	viewerCmd.Dir = workDir
+	// Set image viewer directory env variable
 	viewerCmd.Env = append(os.Environ(), "QT_QPA_PLATFORM=offscreen")
+	// Print out to console and errors too
 	viewerCmd.Stdout = prefixWriter("  [viewer] ")
 	viewerCmd.Stderr = prefixWriter("  [viewer] ")
+	// Ensure starting up flex-web-api works
 	if err := viewerCmd.Start(); err != nil {
 		return fmt.Errorf("starting flex-image-viewer: %w", err)
 	}
 	defer func() { _ = viewerCmd.Process.Kill() }()
-
+	// Ensure 8080 port pops up
 	if err := waitForPort("localhost:8080", 5*time.Second); err != nil {
 		return fmt.Errorf("flex-web-api never came up: %w", err)
 	}
+	// Ensure 8081 prot pops up
 	if err := waitForPort("localhost:8081", 5*time.Second); err != nil {
 		return fmt.Errorf("flex-image-viewer never came up: %w", err)
 	}
 	ok("both services accepting connections")
-
+	// Set up a client
 	client := &http.Client{Timeout: timeout}
 
 	step("Uploading bundled sample.cur to POST /convert?to=%s", toFormat)
+	// Upload sample.cur file and store job id
 	jobID, err := uploadCUR(client, toFormat)
 	if err != nil {
+		// Return error when upload and job id fetching fails
 		return fmt.Errorf("upload/convert step failed: %w", err)
 	}
 	ok("job_id=%s", jobID)
-
+	// Set up viewing verifier step
 	step("Verifying GET /view?job=%s returns the viewer HTML shell", jobID)
+	// Fetch HTML shell body
 	viewBody, status, err := getBody(client, fmt.Sprintf("http://localhost:8081/view?job=%s", jobID))
 	if err != nil {
 		return err
 	}
+	// Ensure fetching HTML succeeds
 	if status != http.StatusOK {
 		return fmt.Errorf("expected 200 from /view, got %d", status)
 	}
+	// Ensure the HTML body contains the expected job id
 	if !bytes.Contains(viewBody, []byte("/raw?job="+jobID)) {
 		return fmt.Errorf("/view response did not embed the expected /raw?job=%s reference", jobID)
 	}
 	ok("viewer HTML references the correct job")
-
+	// Set up image byte verification step
 	step("Verifying GET /raw?job=%s returns real image bytes (exercises transcode-on-view since '%s' isn't browser-safe)", jobID, toFormat)
+	// Extract raw image bytes
 	rawBody, status, err := getBody(client, fmt.Sprintf("http://localhost:8081/raw?job=%s", jobID))
 	if err != nil {
 		return err
 	}
+	// Ensure fetching image bytes succeeds
 	if status != http.StatusOK {
 		return fmt.Errorf("expected 200 from /raw, got %d: %s", status, rawBody)
 	}
+	// Ensure image is a png (because the input extension was cur)
 	if len(rawBody) < 8 || string(rawBody[1:4]) != "PNG" {
 		return fmt.Errorf("expected /raw to serve a transcoded PNG, got %d bytes not starting with the PNG signature", len(rawBody))
 	}
@@ -176,49 +215,63 @@ func run(toFormat, cliPathFlag string, timeout time.Duration) error {
 }
 
 func uploadCUR(client *http.Client, toFormat string) (string, error) {
+	// Set up byte buffer
 	var buf bytes.Buffer
+	// Set up writter buffer
 	w := multipart.NewWriter(&buf)
+	// Create a form file using the sample.cur file
 	fw, err := w.CreateFormFile("file", "sample.cur")
 	if err != nil {
 		return "", err
 	}
+	// Write sample.cur file
 	if _, err := fw.Write(sampleCUR); err != nil {
 		return "", err
 	}
+	// Set up conversion preferences (empty)
 	if err := w.WriteField("preferences", "{}"); err != nil {
 		return "", err
 	}
+	// Close writer
 	if err := w.Close(); err != nil {
 		return "", err
 	}
-
+	// Construct url
 	url := fmt.Sprintf("http://localhost:8080/convert?to=%s", toFormat)
+	// Set up upload request
 	req, err := http.NewRequest(http.MethodPost, url, &buf)
 	if err != nil {
 		return "", err
 	}
+	// Set header content type 
 	req.Header.Set("Content-Type", w.FormDataContentType())
-
+	// Perform request via client
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
+	// Read the uploaded sample.cur
 	body, _ := io.ReadAll(resp.Body)
+	// Ensure reading is successful
 	if resp.StatusCode != http.StatusOK {
+		// Set error when reading fails
 		return "", fmt.Errorf("convert returned %d: %s", resp.StatusCode, body)
 	}
-
+	// Set up job id struct
 	var parsed struct {
 		Status string `json:"status"`
 		JobID  string `json:"job_id"`
 	}
+	// Attempt to parse the job response
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return "", fmt.Errorf("could not parse JSON response %q: %w", body, err)
 	}
+	// Ensure upload is successful and has a non-empty job id
 	if parsed.Status != "success" || parsed.JobID == "" {
 		return "", fmt.Errorf("unexpected response: %s", body)
 	}
+	// Return job id and preferences (empty)
 	return parsed.JobID, nil
 }
 
