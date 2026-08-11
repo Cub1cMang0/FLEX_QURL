@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -11,10 +13,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
-	"encoding/json"
 )
+
 
 
 // Define cli executable location
@@ -30,11 +34,10 @@ func init() {
 	// Check to see if the env file isn't empty
 	if v := os.Getenv("MAX_UPLOAD_BYTES"); v != "" {
 		// Parse set value from env
-		if n, err := strconv.ParseInt(v, 10, 64); err == nill && n > 0 {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
 			// Set the new maxUploadBytes if the extracted number from the env is valid
 			maxUploadBytes = n
-		}
-		else {
+		} else {
 			// Print out message indicating a lack of env
 			log.Printf("Using default maxUploadBytes (no env found): %q", maxUploadBytes)
 		}
@@ -51,9 +54,9 @@ var supportedExts = map[string]bool{
 
 // Used to strip any directory pathing information to just return the file name rather than the whole path
 func sanitizeFilename(name string) string {
-	baseName := filepath.Base(baseName)
+	baseName := filepath.Base(name)
 	// Check for any valid file names
-	if baseName == "." || baseName == ".." || base == "" || base == string(filepath.Separator) {
+	if baseName == "." || baseName == ".." || baseName == "" || baseName == string(filepath.Separator) {
 		return "upload"
 	}
 	return baseName
@@ -92,7 +95,7 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 	// Ensure proper parsing of upload 
 	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
 		var mbErr *http.MaxBytesError
-		if errors.As(err, &mberr) {
+		if errors.As(err, &mbErr) {
 			// Set an error when the user attempts to upload a file larger than 32 MiB
 			http.Error(w, "Upload exceeds maximum allowed size", http.StatusRequestEntityTooLarge)
 			return
