@@ -264,3 +264,67 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// --- Edge-case hardening: job ID validation blocks traversal and XSS ---
+
+func TestIsValidJobID(t *testing.T) {
+	valid := []string{"job-123", "job-empty", "job-png", "job-cur", "does-not-exist", "job-1700000000000000000-1"}
+	for _, id := range valid {
+		if !isValidJobID(id) {
+			t.Errorf("expected %q to be a valid job ID", id)
+		}
+	}
+	invalid := []string{
+		"", "../../../etc/passwd", "..", "job/../../etc",
+		"job-123/../secret", `<script>alert(1)</script>`, `job"><img src=x>`,
+	}
+	for _, id := range invalid {
+		if isValidJobID(id) {
+			t.Errorf("expected %q to be rejected as an invalid job ID", id)
+		}
+	}
+}
+
+func TestViewHandler_RejectsInvalidJobID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/view?job="+`<script>alert(1)</script>`, nil)
+	rec := httptest.NewRecorder()
+	viewHandler(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid job ID, got %d", rec.Code)
+	}
+}
+
+func TestViewHandler_EscapesJobIDInOutput(t *testing.T) {
+	// A job ID that's alphanumeric-plus-hyphen-only can't carry raw HTML
+	// metacharacters, but confirm the escaped form is what actually lands in
+	// the response body as defense in depth.
+	req := httptest.NewRequest(http.MethodGet, "/view?job=job-123", nil)
+	rec := httptest.NewRecorder()
+	viewHandler(rec, req)
+	body, _ := io.ReadAll(rec.Result().Body)
+	if strings.Contains(string(body), "<script>") {
+		t.Errorf("expected no unescaped script tag in output, got: %s", body)
+	}
+}
+
+func TestRawHandler_RejectsPathTraversalJobID(t *testing.T) {
+	tmp := t.TempDir()
+	jobStorePath = tmp
+	// Plant a file just outside jobStorePath to prove it's never reached.
+	secret := filepath.Join(filepath.Dir(tmp), "secret.txt")
+	if err := os.WriteFile(secret, []byte("top secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(secret)
+
+	req := httptest.NewRequest(http.MethodGet, "/raw?job=../secret.txt", nil)
+	rec := httptest.NewRecorder()
+	rawHandler(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for traversal job ID, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body, _ := io.ReadAll(rec.Result().Body)
+	if strings.Contains(string(body), "top secret") {
+		t.Errorf("traversal job ID leaked file contents: %s", body)
+	}
+}

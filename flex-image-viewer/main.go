@@ -4,17 +4,33 @@ package main
 
 import (
 	"fmt"
+	"html"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 )
 
 // Point relatively to the API's workspace since it's in a different folder
 var jobStorePath = "./job_store"
 var cliPath = "./flex-convert-cli"
+
+/* jobIDPattern restricts job IDs to a safe, single-path-segment charset.
+   This does double duty:
+     - no "/" or "\" or ".." means it can never be used for path traversal
+       when joined into jobStorePath (arbitrary file read via ?job=../../etc/passwd)
+     - no "<", ">", quotes, etc. means it's also safe to drop straight into
+       the HTML shell without that on its own enabling reflected XSS
+   It's still HTML-escaped again at the point of use as defense in depth. */
+var jobIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+func isValidJobID(jobID string) bool {
+	return jobIDPattern.MatchString(jobID)
+}
 
 // A set of formats that modern web browsers is capable of natively displaying
 var webSafeFormats = map[string]bool{
@@ -28,9 +44,17 @@ func viewHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing job ID", http.StatusBadRequest)
 		return
 	}
+	if !isValidJobID(jobID) {
+		http.Error(w, "invalid job ID", http.StatusBadRequest)
+		return
+	}
+	// Escaped again here even though isValidJobID already restricts the
+	// charset -- belt and suspenders against this becoming a reflected-XSS
+	// sink if the allowed charset ever changes.
+	safeJobID := html.EscapeString(jobID)
 
 	// Serve a minimal HTML page with the embedded image
-	html := fmt.Sprintf(`<!DOCTYPE html>
+	page := fmt.Sprintf(`<!DOCTYPE html>
 	<html lang="en">
 	<head>
 	<meta charset="UTF-8">
@@ -100,16 +124,24 @@ func viewHandler(w http.ResponseWriter, r *http.Request) {
 		<img src="/raw?job=%s" alt="Converted Document">
 	</div>
 	</body>
-	</html>`, jobID, jobID)
+	</html>`, safeJobID, safeJobID)
 
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(html))
+	w.Write([]byte(page))
 }
 
 // rawHandler fetches the actual image bytes and handles on-the-fly transcoding
 func rawHandler(w http.ResponseWriter, r *http.Request) {
 	// Fetch job ID
 	jobID := r.URL.Query().Get("job")
+	/* Validate before it ever touches the filesystem -- without this, a
+	   request like ?job=../../../etc could join into a path outside
+	   jobStorePath and read (or, via the transcode branch, even attempt to
+	   convert) arbitrary files on disk. */
+	if !isValidJobID(jobID) {
+		http.Error(w, "invalid job ID", http.StatusBadRequest)
+		return
+	}
 	workDir := filepath.Join(jobStorePath, jobID)
 	// Scan the job directory for the converted image
 	files, err := os.ReadDir(workDir)
@@ -178,10 +210,19 @@ func rawHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	http.HandleFunc("/view", viewHandler)
-	http.HandleFunc("/raw", rawHandler)
-	// Listen on port 8081 (neighbors 8080)
-	addr := ":8081"
-	log.Printf("flex-image-viewer listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
+	mux := http.NewServeMux()
+	mux.HandleFunc("/view", viewHandler)
+	mux.HandleFunc("/raw", rawHandler)
+
+	// Explicit timeouts for the same slowloris reasons as flex-web-api.
+	srv := &http.Server{
+		Addr:              ":8081",
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       2 * time.Minute,
+		WriteTimeout:      2 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+	}
+	log.Printf("flex-image-viewer listening on %s", srv.Addr)
+	log.Fatal(srv.ListenAndServe())
 }

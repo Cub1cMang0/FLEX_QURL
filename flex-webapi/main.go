@@ -23,6 +23,51 @@ var cliPath = "./flex-convert-cli"
 // Define the location to store converted image jobs
 var jobPath = "./job_store"
 
+// Define max byte upload limit to 32 MiB
+var maxUploadBytes int64 = 32 << 20
+
+func init() {
+	// Check to see if the env file isn't empty
+	if v := os.Getenv("MAX_UPLOAD_BYTES"); v != "" {
+		// Parse set value from env
+		if n, err := strconv.ParseInt(v, 10, 64); err == nill && n > 0 {
+			// Set the new maxUploadBytes if the extracted number from the env is valid
+			maxUploadBytes = n
+		}
+		else {
+			// Print out message indicating a lack of env
+			log.Printf("Using default maxUploadBytes (no env found): %q", maxUploadBytes)
+		}
+	}
+}
+
+// Define a whitelist of supported extension to reject unsupported extensions before reaching the CLI
+var supportedExts = map[string]bool{
+	"png": true, "jpeg": true, "jpg": true, "ico": true, "jfif": true,
+	"pbm": true, "pgm": true, "ppm": true, "bmp": true, "cur": true,
+	"xbm": true, "xpm": true,
+
+}
+
+// Used to strip any directory pathing information to just return the file name rather than the whole path
+func sanitizeFilename(name string) string {
+	baseName := filepath.Base(baseName)
+	// Check for any valid file names
+	if baseName == "." || baseName == ".." || base == "" || base == string(filepath.Separator) {
+		return "upload"
+	}
+	return baseName
+}
+
+// Used to reduce the possibility of two job generating the same job id (rare but still possible)
+var jobSeq int64
+
+// Used to set the job id utilizing the atomic counter to append to the UnixNano-based job id.
+func nextJobID() string {
+	seq := atomic.AddInt64(&jobSeq, 1)
+	return fmt.Sprintf("job-%d-%d", time.Now().UnixNano(), seq)
+}
+
 func convertHandler(w http.ResponseWriter, r *http.Request) {
 	// Ensure method is POST
 	if r.Method != http.MethodPost {
@@ -36,9 +81,23 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing 'to' query param, e.g. ?to=ico", http.StatusBadRequest)
 		return
 	}
+	// Ensure that the output extension is supported
+	if !supportedExts[outputExt] {
+		// Set an error when an unsupported extension is provided
+		http.Error(w, fmt.Sprintf("Unsupported target format %q, outputExt"), http.StatusBadRequest)
+		return
+	}
+	// Wrap request body to avoid handing over bytes exceeding maxUploadBytes limit
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	// Ensure proper parsing of upload 
-	if err := r.ParseMultipartForm(32 << 20); err != nil { // 32 MiB
-		// Set error
+	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+		var mbErr *http.MaxBytesError
+		if errors.As(err, &mberr) {
+			// Set an error when the user attempts to upload a file larger than 32 MiB
+			http.Error(w, "Upload exceeds maximum allowed size", http.StatusRequestEntityTooLarge)
+			return
+		}
+		// Set error when the upload just fails even if the upload meet the requirements
 		http.Error(w, "could not parse upload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -49,9 +108,9 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-	/* Generate a unique job ID based on the current Unix nanosecond timestamp. This is to avoid
-	any ID generation based on file characteristics */
-	jobID := fmt.Sprintf("job-%d", time.Now().UnixNano())
+	/* Generate a unique job ID based on the current Unix nanosecond timestamp and atomic sequence number. 
+	This is to avoid any ID generation based on file characteristics and collisions */
+	jobID := nextJobID()
 	// Set temp working directory for conversion
 	workDir := filepath.Join(jobPath, jobID)
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
@@ -60,7 +119,7 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Construct input path
-	inputPath := filepath.Join(workDir, header.Filename)
+	inputPath := filepath.Join(workDir, sanitizeFilename(header.Filename))
 	dst, err := os.Create(inputPath)
 	if err != nil {
 		// Set error if output directory creation fails
@@ -92,7 +151,6 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	// Construct command to run FLEX
 	cmd := exec.CommandContext(ctx, absCliPath, inputPath, workDir, outputExt, prefsJSON)
-	log.Printf("abs: %s, input: %s, output: %s, ext: %s, prefs: %s", absCliPath, inputPath, workDir, outputExt, string(prefsJSON))
 	cliOutput, err := cmd.CombinedOutput()
 	if err != nil {
 		// Set error if command construction fails
@@ -111,15 +169,85 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+/* sweepStaleJobs removes job directories under root whose most recent
+   modification time is older than maxAge. It's written as a pure-ish
+   function (root/maxAge/now all passed in, no ticker or global state) so it
+   can be unit tested directly instead of only through a real hour-long
+   ticker. Returns the number of job directories removed. */
+func sweepStaleJobs(root string, maxAge time.Duration, now time.Time) (removed int, err error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return 0, err
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			// job_store should only ever contain per-job subdirectories;
+			// skip anything else rather than deleting it.
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			log.Printf("sweeper: could not stat %s: %v", e.Name(), err)
+			continue
+		}
+		if now.Sub(info.ModTime()) > maxAge {
+			path := filepath.Join(root, e.Name())
+			if err := os.RemoveAll(path); err != nil {
+				log.Printf("sweeper: failed to remove %s: %v", path, err)
+				continue
+			}
+			removed++
+		}
+	}
+	return removed, nil
+}
+ 
+// startJobStoreSweeper runs sweepStaleJobs on a ticker for the lifetime of
+// the process. This is the fix for "what happens to job_store after 10,000
+// conversions": left alone it grows forever, so this sweeps it every
+// interval and deletes anything older than maxAge.
+func startJobStoreSweeper(root string, interval, maxAge time.Duration) {
+	ticker := time.NewTicker(interval)
+	go func() {
+		for range ticker.C {
+			removed, err := sweepStaleJobs(root, maxAge, time.Now())
+			if err != nil {
+				log.Printf("sweeper: error reading job store %s: %v", root, err)
+				continue
+			}
+			if removed > 0 {
+				log.Printf("sweeper: removed %d stale job(s) older than %s", removed, maxAge)
+			}
+		}
+	}()
+}
+
+
 func main() {
 	// Ensure the persistent job store exists when the server starts
 	if err := os.MkdirAll(jobPath, 0o755); err != nil {
 		log.Fatalf("Failed to create job store directory: %v", err)
 	}
-	http.HandleFunc("/convert", convertHandler)
+	// Sweep hourly, evicting job directories older than 24h.
+	startJobStoreSweeper(jobPath, 1*time.Hour, 24*time.Hour)
+ 
+	mux := http.NewServeMux()
+	mux.HandleFunc("/convert", convertHandler)
 	// Serve the front-end (index.html, etc.) from ./static
-	http.Handle("/", http.FileServer(http.Dir("./static")))
-	addr := ":8080"
-	log.Printf("flex-web-api listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
+	mux.Handle("/", http.FileServer(http.Dir("./static")))
+ 
+	/* Explicit timeouts instead of the bare http.ListenAndServe default,
+	   which has none -- a client that trickles bytes in slowly (slowloris)
+	   or never sends them can otherwise hold a connection open forever. */
+	srv := &http.Server{
+		Addr:              ":8080",
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       2 * time.Minute,
+		WriteTimeout:      2 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+	}
+	log.Printf("flex-web-api listening on %s", srv.Addr)
+	log.Fatal(srv.ListenAndServe())
 }
+

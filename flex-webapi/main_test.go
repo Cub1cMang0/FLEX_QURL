@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 /* A real, valid 2x2 RGBA PNG (verified to decode cleanly), used as the
@@ -160,7 +162,7 @@ func TestConvertHandler_SuccessAndCleansUpRawInput(t *testing.T) {
 	// Store results of conversion
 	res := rec.Result()
 	// Check if conversion didn't succeed
-	if res.StatusCode != htFtp.StatusOK {
+	if res.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(res.Body)
 		// Set a fatal error when conversion fails
 		t.Fatalf("expected 200, got %d: %s", res.StatusCode, body)
@@ -230,5 +232,153 @@ func TestConvertHandler_InvalidImageDataFailsConversion(t *testing.T) {
 	if rec.Code != http.StatusUnprocessableEntity {
 		// Set error when error code doesn't match the expected code
 		t.Errorf("expected 422 for unconvertible input, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// --- Edge-case hardening: path traversal, extension whitelist, upload cap, sweeper ---
+
+func TestSanitizeFilename_StripsDirectoryComponents(t *testing.T) {
+	cases := map[string]string{
+		"sample.png":               "sample.png",
+		"../../../etc/cron.d/evil": "evil",
+		"/etc/passwd":              "passwd",
+		"..":                       "upload",
+		".":                        "upload",
+		"":                         "upload",
+	}
+	for in, want := range cases {
+		if got := sanitizeFilename(in); got != want {
+			t.Errorf("sanitizeFilename(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestConvertHandler_RejectsUnsupportedExtension(t *testing.T) {
+	// A 'to' value outside the whitelist must be rejected before it ever
+	// reaches the CLI, regardless of whether a real image was uploaded.
+	req := buildUploadRequest(t, "/convert?to=exe", "file", "sample.png", tinyPNG, nil)
+	rec := httptest.NewRecorder()
+	convertHandler(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for unsupported extension, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestConvertHandler_RejectsOversizedUpload(t *testing.T) {
+	// Temporarily shrink the cap so the test doesn't need to push real
+	// megabytes through httptest.
+	origMax := maxUploadBytes
+	maxUploadBytes = 16
+	defer func() { maxUploadBytes = origMax }()
+
+	oversized := bytes.Repeat([]byte("a"), 1024)
+	req := buildUploadRequest(t, "/convert?to=png", "file", "sample.png", oversized, nil)
+	rec := httptest.NewRecorder()
+	convertHandler(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("expected 413 for oversized upload, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestNextJobID_IsUniqueUnderConcurrency(t *testing.T) {
+	const n = 200
+	ids := make(chan string, n)
+	for i := 0; i < n; i++ {
+		go func() { ids <- nextJobID() }()
+	}
+	seen := make(map[string]bool, n)
+	for i := 0; i < n; i++ {
+		id := <-ids
+		if seen[id] {
+			t.Fatalf("nextJobID produced a duplicate: %s", id)
+		}
+		seen[id] = true
+	}
+}
+
+func TestSweepStaleJobs_RemovesOnlyOldDirectories(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+
+	fresh := filepath.Join(root, "job-fresh")
+	stale := filepath.Join(root, "job-stale")
+	for _, dir := range []string{fresh, stale} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Back-date the "stale" directory's mtime to 48h ago; leave "fresh" alone.
+	old := now.Add(-48 * time.Hour)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := sweepStaleJobs(root, 24*time.Hour, now)
+	if err != nil {
+		t.Fatalf("sweepStaleJobs returned an error: %v", err)
+	}
+	if removed != 1 {
+		t.Errorf("expected 1 job removed, got %d", removed)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Errorf("expected fresh job dir to survive the sweep: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("expected stale job dir to be removed, stat err: %v", err)
+	}
+}
+
+func TestSweepStaleJobs_IgnoresNonDirectoryEntries(t *testing.T) {
+	root := t.TempDir()
+	// A stray file directly in job_store (not a job dir) should be left alone
+	// even if it's "old", since sweepStaleJobs only ever removes directories.
+	stray := filepath.Join(root, "README.txt")
+	if err := os.WriteFile(stray, []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-72 * time.Hour)
+	if err := os.Chtimes(stray, old, old); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := sweepStaleJobs(root, 24*time.Hour, time.Now())
+	if err != nil {
+		t.Fatalf("sweepStaleJobs returned an error: %v", err)
+	}
+	if removed != 0 {
+		t.Errorf("expected 0 removed (file, not dir), got %d", removed)
+	}
+	if _, err := os.Stat(stray); err != nil {
+		t.Errorf("expected stray file to survive the sweep: %v", err)
+	}
+}
+
+func TestConvertHandler_SanitizesTraversalFilename(t *testing.T) {
+	cli := resolveCLIPath(t)
+	if cli == "" {
+		t.Skip("flex-convert-cli binary not found; build flex-cli or set FLEX_CLI_PATH to run this test")
+	}
+	cliPath = cli
+	jobPath = t.TempDir()
+
+	// A filename crafted to escape the job's workDir. sanitizeFilename should
+	// reduce it to just "evil.png" and keep the write confined to workDir.
+	req := buildUploadRequest(t, "/convert?to=png", "file", "../../../evil.png", tinyPNG, nil)
+	rec := httptest.NewRecorder()
+	convertHandler(rec, req)
+	res := rec.Result()
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("expected 200, got %d: %s", res.StatusCode, body)
+	}
+	// Nothing should have been written above jobPath.
+	parent := filepath.Dir(jobPath)
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "evil") {
+			t.Errorf("traversal filename escaped jobPath: found %q in %s", e.Name(), parent)
+		}
 	}
 }
