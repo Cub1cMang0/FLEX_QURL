@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"flex-web-api/storage"
+	"github.com/joho/godotenv"
 )
 
 // Define cli executable location
@@ -229,7 +231,7 @@ func main() {
 	if err := os.MkdirAll(jobPath, 0o755); err != nil {
 		log.Fatalf("Failed to create job store directory: %v", err)
 	}
-	
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/convert", convertHandler)
 	// Serve the front-end (index.html, etc.) from ./static
