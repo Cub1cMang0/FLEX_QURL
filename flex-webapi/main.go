@@ -19,8 +19,6 @@ import (
 	"time"
 )
 
-
-
 // Define cli executable location
 var cliPath = "./flex-convert-cli"
 
@@ -231,9 +229,7 @@ func main() {
 	if err := os.MkdirAll(jobPath, 0o755); err != nil {
 		log.Fatalf("Failed to create job store directory: %v", err)
 	}
-	// Sweep hourly, evicting job directories older than 24h.
-	startJobStoreSweeper(jobPath, 1*time.Hour, 24*time.Hour)
- 
+	
 	mux := http.NewServeMux()
 	mux.HandleFunc("/convert", convertHandler)
 	// Serve the front-end (index.html, etc.) from ./static

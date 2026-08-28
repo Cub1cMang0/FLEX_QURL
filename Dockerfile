@@ -34,7 +34,22 @@ RUN go mod download
 RUN go build -o flex-image-viewer main.go
 
 # ==========================================
-# STAGE 2: Runner
+# STAGE 2: qURL CLI
+# ==========================================
+FROM debian:bookworm-slim AS qurl
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates jq \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG QURL_VERSION=2.0.3
+RUN curl -fsSL "https://github.com/layervai/qurl-integrations/releases/download/v${QURL_VERSION}/qurl_${QURL_VERSION}_linux_amd64.tar.gz" -o /tmp/qurl.tar.gz \
+    && tar -xzf /tmp/qurl.tar.gz -C /usr/local/bin qurl \
+    && rm /tmp/qurl.tar.gz \
+    && chmod +x /usr/local/bin/qurl
+
+# ==========================================
+# STAGE 3: Runner
 # ==========================================
 FROM fedora:40
 
@@ -43,6 +58,8 @@ FROM fedora:40
 RUN dnf update -y && \
     dnf install -y qt5-qtbase qt5-qtbase-gui && \
     dnf clean all
+
+COPY --from=qurl /usr/local/bin/qurl /usr/local/bin/qurl
 
 WORKDIR /app
 
