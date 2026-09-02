@@ -438,10 +438,7 @@
 
     <button class="go" id="convertBtn" disabled>CONVERT</button>
     <div class="status" id="status"></div>
-    <div class="result" data-job-id="job-xyz">
-    <button class="view-btn">View</button>
-    <button class="download-btn">Download</button>
-    </div>
+    <div id="results-container"></div>
   </div>
 
   <footer>FLEX WEB · v1</footer>
@@ -532,11 +529,13 @@
       body: formData,
     });
     const data = await res.json(); // e.g. { jobID: "job-xyz", filename: "...", ... }
-
+    if (!res.ok) {
+      throw new Error(data.error || `Server returned HTTP ${res.status}`);
+    }
     // --- "building the result card" is this part ---
     const resultEl = document.createElement('div');
     resultEl.className = 'result';
-    resultEl.dataset.jobID = data.jobID; // this is the part that matters most
+    resultEl.dataset.jobId = data.jobID; // this is the part that matters most
 
     resultEl.innerHTML = `
       <p>${data.filename} converted successfully</p>
@@ -588,35 +587,45 @@
     convertBtn.textContent = 'CONVERTING…';
     status.className = 'status';
     status.textContent = '';
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedFile);
 
-    const formData = new FormData();
-    formData.append('file', selectedFile);
+      // Build JSON exactly like the C++ code expects: [bool, "value"] or [bool]
+      const prefs = { image: {} };
+      const arSelect = document.getElementById('prefAspectRatio').value;
+      if (arSelect === "Keep Aspect Ratio") {
+          prefs.image.aspect_ratio = [false, "None"];
+      } else {
+          prefs.image.aspect_ratio = [true, arSelect];
+      }
+      if (!prefQualityCb.checked) {
+          prefs.image.quality = [false, "None"];
+      } else {
+          prefs.image.quality = [true, prefQualityVal.value];
+      }
+      prefs.image.grayscale = [document.getElementById('prefGrayscale').checked];
+      prefs.image.alpha = [document.getElementById('prefAlpha').checked];
 
-    // Build JSON exactly like the C++ code expects: [bool, "value"] or [bool]
-    const prefs = { image: {} };
-    const arSelect = document.getElementById('prefAspectRatio').value;
-    if (arSelect === "Keep Aspect Ratio") {
-        prefs.image.aspect_ratio = [false, "None"];
-    } else {
-        prefs.image.aspect_ratio = [true, arSelect];
+      if (!prefBitDepthCb.checked) {
+          prefs.image.bitdepth = [false, "None"];
+      } else {
+          prefs.image.bitdepth = [true, prefBitDepthVal.value];
+      }
+      // Append the compiled JSON string to be grabbed by the Go backend
+      formData.append('preferences', JSON.stringify(prefs));
+      handleConvertSubmit(formData)
+      convertBtn.textContent = 'CONVERT';
+      status.className = 'status ok';
+      status.textContent = `Conversion complete!`;
+    } catch (err) {
+      console.error(err);
+      convertBtn.textContent = 'CONVERT';
+      status.className = 'status err';
+      status.textContent = `Conversion failed: ${err.message}`;
+    } finally {
+      convertBtn.disabled = false;
     }
-    if (!prefQualityCb.checked) {
-        prefs.image.quality = [false, "None"];
-    } else {
-        prefs.image.quality = [true, prefQualityVal.value];
-    }
-    prefs.image.grayscale = [document.getElementById('prefGrayscale').checked];
-    prefs.image.alpha = [document.getElementById('prefAlpha').checked];
-
-    if (!prefBitDepthCb.checked) {
-        prefs.image.bitdepth = [false, "None"];
-    } else {
-        prefs.image.bitdepth = [true, prefBitDepthVal.value];
-    }
-    // Append the compiled JSON string to be grabbed by the Go backend
-    formData.append('preferences', JSON.stringify(prefs));
-    handleConvertSubmit(formData)
-
   });
 </script>
 

@@ -173,7 +173,7 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Server error attempting to connect to Cloudflare R2", http.StatusInternalServerError)
 		return
 	}
-	outputPath := filepath.Join(workDir, jobID, ".", outputExt)
+	outputPath := filepath.Join(workDir, jobID + "." + outputExt)
 	downloadPath, downloadURL, err := r2Client.UploadJobImage(ctx, jobID, outputPath, "." + outputExt)
 	if err != nil {
 		http.Error(w, "Server error attempting to download converted output", http.StatusInternalServerError)
