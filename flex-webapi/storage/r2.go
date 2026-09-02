@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"github.com/joho/godotenv"
+	"strings"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"encoding/json"
 )
 
 type R2Client struct {
@@ -61,15 +63,14 @@ func contentTypeFor(ext string) string {
 	return "application/octet-stream" // forces download instead of inline render — treat as a bug if you hit this
 }
 
-func (r *R2Client) UploadJobImage(ctx context.Context, jobID, localPath, ext string) (string, error) {
+// Uploads converted output into Cloudflare R2 object and returns download link
+func (r *R2Client) UploadJobImage(ctx context.Context, jobID, localPath, ext string) (donwloadKey string, downloadURL string, err error) {
 	f, err := os.Open(localPath)
 	if err != nil {
-		return "", fmt.Errorf("opening local file: %w", err)
+		return "", "", fmt.Errorf("opening local file: %w", err)
 	}
 	defer f.Close()
-
 	key := fmt.Sprintf("%s/%s%s", jobID, jobID, ext)
-
 	_, err = r.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(r.bucket),
 		Key:         aws.String(key),
@@ -77,45 +78,78 @@ func (r *R2Client) UploadJobImage(ctx context.Context, jobID, localPath, ext str
 		ContentType: aws.String(contentTypeFor(ext)),
 	})
 	if err != nil {
-		return "", fmt.Errorf("uploading to R2: %w", err)
+		return "", "", fmt.Errorf("uploading to R2: %w", err)
 	}
-
-	return fmt.Sprintf("%s/%s", r.publicBase, key), nil
+	url := fmt.Sprintf("%s/%s", r.publicBase, key)
+	return key, url, nil
 }
 
-func (r *R2Client) DeleteJobImage(ctx context.Context, jobID, ext string) error {
+func (r *R2Client) CreateViewCopy(ctx context.Context, downloadKey, ext string) (viewKey string, viewURL string, err error) {
+	// "job-xyz/job-xyz.png" -> "job-xyz/job-xyz-view.png"
+	base := strings.TrimSuffix(downloadKey, ext)
+	viewKey = base + "-view" + ext
+	copySource := fmt.Sprintf("%s/%s", r.bucket, downloadKey)
+	_, err = r.client.CopyObject(ctx, &s3.CopyObjectInput{
+		Bucket:            aws.String(r.bucket),
+		Key:               aws.String(viewKey),
+		CopySource:        aws.String(copySource),
+		ContentType:       aws.String(contentTypeFor(ext)),
+		MetadataDirective: types.MetadataDirectiveReplace,
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("copying view object in R2: %w", err)
+	}
+	viewURL = fmt.Sprintf("%s/%s", r.publicBase, viewKey)
+	return viewKey, viewURL, nil
+}
+
+func (r *R2Client) UploadMetadata(ctx context.Context, localPath string, jobID string) (err error) {
+	jobLocation := fmt.Sprintf("%s/meta.json", jobID)
+	f, err := os.Open(localPath)
+	if err != nil {
+		return fmt.Errorf("opening meta.json file: %w", err)
+	}
+	defer f.Close()
+	_, err = r.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(r.bucket),
+		Key:         aws.String(jobLocation),
+		Body:        f,
+		ContentType: aws.String("application/json"),
+	})
+	if err != nil {
+		return fmt.Errorf("uploading to R2: %w", err)
+	}
+	return nil
+}
+
+func (r *R2Client) DeleteJobImage(ctx context.Context, jobID, ext string) (err error) {
 	key := fmt.Sprintf("%s/%s%s", jobID, jobID, ext)
-	_, err := r.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+	_, err = r.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(r.bucket),
 		Key:    aws.String(key),
 	})
 	return err
 }
 
+func (r *R2Client) GetMetadata(ctx context.Context, jobID string) (data map[string]string, err error) {
+	key := fmt.Sprintf("%s/meta.json", jobID)
+	metaData, err := r.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(r.bucket),
+		Key: aws.String(key),
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer metaData.Body.Close()
+	var jsonData map[string]string
+	err = json.NewDecoder(metaData.Body).Decode(&jsonData)
+	if err != nil {
+		return nil, err
+	}
+	return jsonData, nil
+}
+
 func main() {
-	if err := godotenv.Load(); err != nil {
-		fmt.Printf("warning: could not load .env: %v\n", err)
-	}
-
-	ctx := context.Background()
-
-	r2Client, err := NewR2Client(ctx)
-	if err != nil {
-		fmt.Printf("failed to create R2 client: %v\n", err)
-		return
-	}
-
-	result, er := r2Client.UploadJobImage(
-		ctx,
-		"job-123",
-		"job-123/job-123.png",
-		".png",
-	)
-	if err != nil {
-		fmt.Printf("failed to delete image: %v\n", er)
-		return
-	}
-
-	fmt.Printf("uploaded image %s: ", result)
+	return;
 }
 

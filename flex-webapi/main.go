@@ -52,6 +52,11 @@ var supportedExts = map[string]bool{
 
 }
 
+// Define a whitelist of extensions that can be natively viewed in browsers
+var webSafeFormats = map[string]bool{
+	"png": true, "jpg": true, "jpeg": true, "bmp": true, "ico": true, "jfif": true,
+}
+
 // Used to strip any directory pathing information to just return the file name rather than the whole path
 func sanitizeFilename(name string) string {
 	baseName := filepath.Base(name)
@@ -87,7 +92,7 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 	// Ensure that the output extension is supported
 	if !supportedExts[outputExt] {
 		// Set an error when an unsupported extension is provided
-		http.Error(w, fmt.Sprintf("Unsupported target format %q, outputExt"), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("Unsupported target format %q", outputExt), http.StatusBadRequest)
 		return
 	}
 	// Wrap request body to avoid handing over bytes exceeding maxUploadBytes limit
@@ -161,13 +166,172 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	os.Remove(inputPath)
+	// Set up R2 client to begin upload
+	r2Client, err := storage.NewR2Client(ctx)
+	if err != nil {
+		// Set error if command construction fails
+		http.Error(w, "Server error attempting to connect to Cloudflare R2", http.StatusInternalServerError)
+		return
+	}
+	outputPath := filepath.Join(workDir, jobID, ".", outputExt)
+	downloadPath, downloadURL, err := r2Client.UploadJobImage(ctx, jobID, outputPath, "." + outputExt)
+	if err != nil {
+		http.Error(w, "Server error attempting to download converted output", http.StatusInternalServerError)
+		return
+	}
+	var viewPath string
+	var viewURL string
+	var e error
+	if !webSafeFormats[outputExt] {
+		fileName := fmt.Sprintf("%s.%s", jobID, outputExt)
+		unsafeFilePath := filepath.Join(workDir, fileName)
+		cmd := exec.CommandContext(ctx, absCliPath, unsafeFilePath, workDir, "png", "{}")
+		cliOutput, err := cmd.CombinedOutput()
+		if err != nil {
+			http.Error(w, fmt.Sprintf("conversion failed: %s", strings.TrimSpace(string(cliOutput))), http.StatusUnprocessableEntity)
+			return
+		}
+		outputPath = filepath.Join(workDir, jobID, ".png")
+		downloadPath, _, err = r2Client.UploadJobImage(ctx, jobID, outputPath, ".png")
+		if err != nil {
+			http.Error(w, "Server error attempting to download converted output", http.StatusInternalServerError)
+			return
+		}
+		viewPath, viewURL, e = r2Client.CreateViewCopy(ctx, downloadPath, ".png")
+		if e != nil {
+			http.Error(w, "Server error attempting to view converted output", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		viewPath, viewURL, err = r2Client.CreateViewCopy(ctx, downloadPath, "." + outputExt)
+		if err != nil {
+			http.Error(w, "Server error attempting to view converted output", http.StatusInternalServerError)
+			return
+		}
+	}
+	metaData := map[string]string{
+		"jobID": jobID,
+		"downloadURL": downloadURL,
+		"viewURL": viewURL,
+		"download_CRID": "",
+		"view_CRID": "",
+	}
+	jsonData, err := json.Marshal(metaData)
+	if err != nil {
+		http.Error(w, "Server error attempting to create meta data", http.StatusInternalServerError)
+		return
+	}
+	metaPath := filepath.Join(workDir, "meta.json")
+	err = os.WriteFile(metaPath, jsonData, 0644)
+	if err != nil {
+		http.Error(w, "Server error attempting to write meta data", http.StatusInternalServerError)
+		return
+	}
+	err = r2Client.UploadMetadata(ctx, metaPath, jobID)
+	if err != nil {
+		http.Error(w, "Unable to upload meta data", http.StatusInternalServerError)
+		return
+	}
+	fmt.Printf("download image %s: ", downloadPath)
+	fmt.Printf("view image %s: ", viewPath)
 	log.Printf("cli: %s", strings.TrimSpace(string(cliOutput)))
 	// Set header info
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	response := map[string]string{
 		"status": "success",
-		"job_id": jobID,
+		"jobID": jobID,
+		"filename": sanitizeFilename(header.Filename),
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
+func viewHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "use GET", http.StatusMethodNotAllowed)
+		return
+	}
+	ctx, _ := context.WithTimeout(r.Context(), 30*time.Second)
+	// Set up R2 client to begin upload
+	r2Client, err := storage.NewR2Client(ctx)
+	if err != nil {
+		// Set error if command construction fails
+		http.Error(w, "Server error attempting to connect to Cloudflare R2", http.StatusInternalServerError)
+		return
+	}
+	jobID := r.PathValue("jobID")
+	jsonData, err := r2Client.GetMetadata(ctx, jobID)
+	if err != nil {
+		http.Error(w, "Server error attempting to get meta data", http.StatusInternalServerError)
+		return
+	}
+	viewURL := jsonData["viewURL"]
+	cmd := exec.Command("qurl", "publish", viewURL)
+	crid, err := cmd.CombinedOutput()
+	if err != nil {
+		http.Error(w, "Server error attempting to publish resource", http.StatusInternalServerError)
+		return
+	}
+	cmd = exec.Command("qurl", "resolve", string(crid))
+	qurlLink, err := cmd.CombinedOutput()
+	if err != nil {
+		http.Error(w, "Server error attempting to resolve resource", http.StatusUnprocessableEntity)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	response := map[string]string{
+		"status": "success",
+		"qurl_link": string(qurlLink),
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
+func downloadHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "use GET", http.StatusMethodNotAllowed)
+		return
+	}
+	ctx, _ := context.WithTimeout(r.Context(), 30*time.Second)
+	// Set up R2 client to begin upload
+	r2Client, err := storage.NewR2Client(ctx)
+	if err != nil {
+		// Set error if command construction fails
+		http.Error(w, "Server error attempting to connect to Cloudflare R2", http.StatusInternalServerError)
+		return
+	}
+	jobID := r.PathValue("jobID")
+	jsonData, err := r2Client.GetMetadata(ctx, jobID)
+	if err != nil {
+		http.Error(w, "Server error attempting to get meta data", http.StatusInternalServerError)
+		return
+	}
+	downloadURL := jsonData["downloadURL"]
+	cmd := exec.Command("qurl", "publish", downloadURL)
+	if err != nil {
+		http.Error(w, "Error attempting to construct publish command", http.StatusInternalServerError)
+		return
+	}
+	crid, err := cmd.CombinedOutput()
+	if err != nil {
+		http.Error(w, "Server error attempting to publish resource", http.StatusInternalServerError)
+		return
+	}
+	cmd = exec.Command("qurl", "resolve", string(crid))
+	if err != nil {
+		http.Error(w, "Server error attempting to construct resolve command", http.StatusUnprocessableEntity)
+		return
+	}
+	qurlLink, err := cmd.CombinedOutput()
+	if err != nil {
+		http.Error(w, "Server error attempting to resolve resource", http.StatusUnprocessableEntity)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	response := map[string]string{
+		"status": "success",
+		"qurl_link": string(qurlLink),
 	}
 	json.NewEncoder(w).Encode(response)
 }
@@ -227,6 +391,10 @@ func startJobStoreSweeper(root string, interval, maxAge time.Duration) {
 
 
 func main() {
+	// Load in .env variables from either a local .env or env variables set on Render.
+	if err := godotenv.Load(); err != nil {
+		fmt.Printf("warning: could not load .env variables: %v\n", err)
+	}
 	// Ensure the persistent job store exists when the server starts
 	if err := os.MkdirAll(jobPath, 0o755); err != nil {
 		log.Fatalf("Failed to create job store directory: %v", err)
@@ -234,6 +402,8 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/convert", convertHandler)
+	mux.HandleFunc("GET /jobs/{jobID}/view", viewHandler)
+	mux.HandleFunc("GET /jobs/{jobID}/download", downloadHandler)
 	// Serve the front-end (index.html, etc.) from ./static
 	mux.Handle("/", http.FileServer(http.Dir("./static")))
  

@@ -438,6 +438,10 @@
 
     <button class="go" id="convertBtn" disabled>CONVERT</button>
     <div class="status" id="status"></div>
+    <div class="result" data-job-id="job-xyz">
+    <button class="view-btn">View</button>
+    <button class="download-btn">Download</button>
+    </div>
   </div>
 
   <footer>FLEX WEB · v1</footer>
@@ -450,6 +454,7 @@
   const srcBadge = document.getElementById('srcBadge');
   const targetFormat = document.getElementById('targetFormat');
   const convertBtn = document.getElementById('convertBtn');
+  const viewBtn = document.getElementById('viewBtn');
   const status = document.getElementById('status');
   const supportedExt = new Set(["png", "jpeg", "jpg", "ico", "jfif", "pbm", "pgm", "ppm", "bmp", "cur",
                       "xmb", "xpm"])
@@ -480,8 +485,70 @@
     dzFilename.textContent = file.name;
     dzLabel.textContent = "File selected — click to change";
     convertBtn.disabled = false;
+    viewBtn.disabled = true;
     status.textContent = "";
     status.className = "status";
+  }
+
+  function attachResultHandlers(resultEl) {
+    const jobID = resultEl.dataset.jobID;
+
+    resultEl.querySelector('.view-btn').addEventListener('click', async (e) => {
+      const btn = e.target;
+      btn.disabled = true;
+      btn.textContent = 'Loading...';
+      try {
+        const res = await fetch(`/jobs/${jobID}/view`);
+        const data = await res.json();
+        window.open(data.qurl_link, '_blank');
+      } catch (err) {
+        alert('Could not generate view link.');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'View';
+      }
+    });
+
+    resultEl.querySelector('.download-btn').addEventListener('click', async (e) => {
+      const btn = e.target;
+      btn.disabled = true;
+      btn.textContent = 'Loading...';
+      try {
+        const res = await fetch(`/jobs/${jobID}/download`);
+        const data = await res.json();
+        window.location.href = data.qurl_link;
+      } catch (err) {
+        alert('Could not generate download link.');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Download';
+      }
+    });
+  }
+
+  async function handleConvertSubmit(formData) {
+    const res = await fetch(`/convert?to=${targetFormat.value}`, {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await res.json(); // e.g. { jobID: "job-xyz", filename: "...", ... }
+
+    // --- "building the result card" is this part ---
+    const resultEl = document.createElement('div');
+    resultEl.className = 'result';
+    resultEl.dataset.jobID = data.jobID; // this is the part that matters most
+
+    resultEl.innerHTML = `
+      <p>${data.filename} converted successfully</p>
+      <button class="view-btn">View</button>
+      <button class="download-btn">Download</button>
+    `;
+
+    document.getElementById('results-container').appendChild(resultEl);
+    // --- card now exists in the actual page ---
+
+    // now that resultEl is real and in the DOM, wire up its buttons
+    attachResultHandlers(resultEl);
   }
 
   dropzone.addEventListener('click', () => fileInput.click());
@@ -548,30 +615,8 @@
     }
     // Append the compiled JSON string to be grabbed by the Go backend
     formData.append('preferences', JSON.stringify(prefs));
+    handleConvertSubmit(formData)
 
-    try {
-      const res = await fetch(`/convert?to=${targetFormat.value}`, {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `request failed (${res.status})`);
-      }
-      // Parse the JSON response
-      const data = await res.json();
-      // Set status
-      status.className = 'status ok';
-      // Render a clean, clickable link pointing to the viewer service
-      status.innerHTML = `conversion complete — <a href="http://localhost:8081/view?job=${data.job_id}">view image</a>`;
-    } catch (err) {
-      status.className = 'status err';
-      status.textContent = err.message;
-    } finally {
-      convertBtn.disabled = false;
-      convertBtn.textContent = 'CONVERT';
-    }
   });
 </script>
 
