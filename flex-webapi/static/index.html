@@ -343,6 +343,50 @@
     transform: translateY(-4px);
   }
 
+  #results-container {
+    margin-top: 24px;
+  }
+
+  .result {
+    border: 1px solid var(--panel-border);
+    background: var(--panel-bg);
+    border-radius: 8px;
+    padding: 16px;
+  }
+
+  .result p {
+    margin: 0 0 14px;
+    color: var(--text-main);
+    font-size: 14px;
+  }
+
+  .result-actions {
+    display: flex;
+    gap: 10px;
+  }
+
+  .result-actions button {
+    flex: 1;
+    padding: 10px 14px;
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    background: var(--bg-base);
+    color: var(--text-main);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .result-actions button:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .result-actions button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
 </style>
 
 </head>
@@ -488,7 +532,7 @@
   }
 
   function attachResultHandlers(resultEl) {
-    const jobID = resultEl.dataset.jobID;
+    const jobID = resultEl.dataset.jobId;
 
     resultEl.querySelector('.view-btn').addEventListener('click', async (e) => {
       const btn = e.target;
@@ -497,6 +541,9 @@
       try {
         const res = await fetch(`/jobs/${jobID}/view`);
         const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to generate view link');
+        }
         window.open(data.qurl_link, '_blank');
       } catch (err) {
         alert('Could not generate view link.');
@@ -513,7 +560,10 @@
       try {
         const res = await fetch(`/jobs/${jobID}/download`);
         const data = await res.json();
-        window.location.href = data.qurl_link;
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to generate download link');
+        }
+        window.open(data.qurl_link, '_blank');
       } catch (err) {
         alert('Could not generate download link.');
       } finally {
@@ -537,11 +587,13 @@
     resultEl.className = 'result';
     resultEl.dataset.jobId = data.jobID; // this is the part that matters most
 
-    resultEl.innerHTML = `
-      <p>${data.filename} converted successfully</p>
-      <button class="view-btn">View</button>
-      <button class="download-btn">Download</button>
-    `;
+  resultEl.innerHTML = `
+    <p>${data.filename} converted successfully</p>
+    <div class="result-actions">
+      <button type="button" class="view-btn">View</button>
+      <button type="button" class="download-btn">Download</button>
+    </div>
+  `;
 
     document.getElementById('results-container').appendChild(resultEl);
     // --- card now exists in the actual page ---
@@ -614,7 +666,7 @@
       }
       // Append the compiled JSON string to be grabbed by the Go backend
       formData.append('preferences', JSON.stringify(prefs));
-      handleConvertSubmit(formData)
+      await handleConvertSubmit(formData)
       convertBtn.textContent = 'CONVERT';
       status.className = 'status ok';
       status.textContent = `Conversion complete!`;

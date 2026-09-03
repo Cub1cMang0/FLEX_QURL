@@ -42,7 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates jq \
     && rm -rf /var/lib/apt/lists/*
 
-ARG QURL_VERSION=2.0.3
+ARG QURL_VERSION=2.2.0
 RUN curl -fsSL "https://github.com/layervai/qurl-integrations/releases/download/v${QURL_VERSION}/qurl_${QURL_VERSION}_linux_amd64.tar.gz" -o /tmp/qurl.tar.gz \
     && tar -xzf /tmp/qurl.tar.gz -C /usr/local/bin qurl \
     && rm /tmp/qurl.tar.gz \

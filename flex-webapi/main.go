@@ -166,6 +166,11 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	os.Remove(inputPath)
+	// Get the original sanitized filename and strip its original extension
+	sanitizedName := sanitizeFilename(header.Filename)
+	baseName := strings.TrimSuffix(sanitizedName, filepath.Ext(sanitizedName))
+	// Construct the actual path the CLI wrote to
+	outputPath := filepath.Join(workDir, baseName + "." + outputExt)
 	// Set up R2 client to begin upload
 	r2Client, err := storage.NewR2Client(ctx)
 	if err != nil {
@@ -173,7 +178,6 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Server error attempting to connect to Cloudflare R2", http.StatusInternalServerError)
 		return
 	}
-	outputPath := filepath.Join(workDir, jobID + "." + outputExt)
 	downloadPath, downloadURL, err := r2Client.UploadJobImage(ctx, jobID, outputPath, "." + outputExt)
 	if err != nil {
 		http.Error(w, "Server error attempting to download converted output", http.StatusInternalServerError)
@@ -183,16 +187,15 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 	var viewURL string
 	var e error
 	if !webSafeFormats[outputExt] {
-		fileName := fmt.Sprintf("%s.%s", jobID, outputExt)
-		unsafeFilePath := filepath.Join(workDir, fileName)
+		unsafeFilePath := outputPath
 		cmd := exec.CommandContext(ctx, absCliPath, unsafeFilePath, workDir, "png", "{}")
 		cliOutput, err := cmd.CombinedOutput()
 		if err != nil {
 			http.Error(w, fmt.Sprintf("conversion failed: %s", strings.TrimSpace(string(cliOutput))), http.StatusUnprocessableEntity)
 			return
 		}
-		outputPath = filepath.Join(workDir, jobID, ".png")
-		downloadPath, _, err = r2Client.UploadJobImage(ctx, jobID, outputPath, ".png")
+		pngOutputPath := filepath.Join(workDir, baseName + ".png")
+		downloadPath, _, err = r2Client.UploadJobImage(ctx, jobID, pngOutputPath, ".png")
 		if err != nil {
 			http.Error(w, "Server error attempting to download converted output", http.StatusInternalServerError)
 			return
@@ -265,24 +268,48 @@ func viewHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Server error attempting to get meta data", http.StatusInternalServerError)
 		return
 	}
-	viewURL := jsonData["viewURL"]
-	cmd := exec.Command("qurl", "publish", viewURL)
-	crid, err := cmd.CombinedOutput()
-	if err != nil {
-		http.Error(w, "Server error attempting to publish resource", http.StatusInternalServerError)
-		return
+	var crid string
+	if jsonData["view_CRID"] == "" {
+		viewURL := jsonData["viewURL"]
+		publishCmd := exec.Command("qurl", "publish", "-q", viewURL)
+		cridBytes, err := publishCmd.CombinedOutput()
+		if err != nil {
+			http.Error(w, "Server error attempting to publish resource", http.StatusInternalServerError)
+			return
+		}
+		crid = strings.TrimSpace(string(cridBytes))
+		jsonData["view_CRID"] = crid
+		workDir := filepath.Join(jobPath, jsonData["jobID"])
+		metaPath := filepath.Join(workDir, "meta.json")
+		data, err := json.Marshal(jsonData)
+		if err != nil {
+			http.Error(w, "Server error attempting to create meta data", http.StatusInternalServerError)
+			return
+		}
+		err = os.WriteFile(metaPath, data, 0644)
+		if err != nil {
+			http.Error(w, "Server error attempting to write meta data", http.StatusInternalServerError)
+			return
+		}
+		err = r2Client.UploadMetadata(ctx, metaPath, jobID)
+		if err != nil {
+			http.Error(w, "Unable to upload meta data", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		crid = jsonData["view_CRID"]
 	}
-	cmd = exec.Command("qurl", "resolve", string(crid))
-	qurlLink, err := cmd.CombinedOutput()
+	shareCmd := exec.Command("qurl", "share", crid)
+	qurlLinkBytes, err := shareCmd.CombinedOutput()
 	if err != nil {
-		http.Error(w, "Server error attempting to resolve resource", http.StatusUnprocessableEntity)
+		http.Error(w, "Server error attempting to share resource", http.StatusUnprocessableEntity)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	response := map[string]string{
 		"status": "success",
-		"qurl_link": string(qurlLink),
+		"qurl_link": strings.TrimSpace(string(qurlLinkBytes)),
 	}
 	json.NewEncoder(w).Encode(response)
 }
@@ -306,32 +333,48 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Server error attempting to get meta data", http.StatusInternalServerError)
 		return
 	}
-	downloadURL := jsonData["downloadURL"]
-	cmd := exec.Command("qurl", "publish", downloadURL)
-	if err != nil {
-		http.Error(w, "Error attempting to construct publish command", http.StatusInternalServerError)
-		return
+	var crid string
+	if jsonData["download_CRID"] == "" {
+		downloadURL := jsonData["downloadURL"]
+		publishCmd := exec.Command("qurl", "publish", "-q", downloadURL)
+		cridBytes, err := publishCmd.CombinedOutput()
+		if err != nil {
+			http.Error(w, "Server error attempting to publish resource", http.StatusInternalServerError)
+			return
+		}
+		crid = strings.TrimSpace(string(cridBytes))
+		jsonData["download_CRID"] = crid
+		workDir := filepath.Join(jobPath, jsonData["jobID"])
+		metaPath := filepath.Join(workDir, "meta.json")
+		data, err := json.Marshal(jsonData)
+		if err != nil {
+			http.Error(w, "Server error attempting to create meta data", http.StatusInternalServerError)
+			return
+		}
+		err = os.WriteFile(metaPath, data, 0644)
+		if err != nil {
+			http.Error(w, "Server error attempting to write meta data", http.StatusInternalServerError)
+			return
+		}
+		err = r2Client.UploadMetadata(ctx, metaPath, jobID)
+		if err != nil {
+			http.Error(w, "Unable to upload meta data", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		crid = jsonData["download_CRID"]
 	}
-	crid, err := cmd.CombinedOutput()
+	shareCmd := exec.Command("qurl", "share", crid)
+	qurlLinkBytes, err := shareCmd.CombinedOutput()
 	if err != nil {
-		http.Error(w, "Server error attempting to publish resource", http.StatusInternalServerError)
-		return
-	}
-	cmd = exec.Command("qurl", "resolve", string(crid))
-	if err != nil {
-		http.Error(w, "Server error attempting to construct resolve command", http.StatusUnprocessableEntity)
-		return
-	}
-	qurlLink, err := cmd.CombinedOutput()
-	if err != nil {
-		http.Error(w, "Server error attempting to resolve resource", http.StatusUnprocessableEntity)
+		http.Error(w, "Server error attempting to share resource", http.StatusUnprocessableEntity)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	response := map[string]string{
 		"status": "success",
-		"qurl_link": string(qurlLink),
+		"qurl_link": strings.TrimSpace(string(qurlLinkBytes)),
 	}
 	json.NewEncoder(w).Encode(response)
 }

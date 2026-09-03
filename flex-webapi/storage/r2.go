@@ -76,6 +76,7 @@ func (r *R2Client) UploadJobImage(ctx context.Context, jobID, localPath, ext str
 		Key:         aws.String(key),
 		Body:        f,
 		ContentType: aws.String(contentTypeFor(ext)),
+		ContentDisposition: aws.String(fmt.Sprintf("attachment; filename=\"%s%s\"", jobID, ext)),
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("uploading to R2: %w", err)
