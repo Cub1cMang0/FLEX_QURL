@@ -159,6 +159,7 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	// Construct command to run FLEX
 	cmd := exec.CommandContext(ctx, absCliPath, inputPath, workDir, outputExt, prefsJSON)
+	// Capture output and error
 	cliOutput, err := cmd.CombinedOutput()
 	if err != nil {
 		// Set error if command construction fails
@@ -178,58 +179,76 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Server error attempting to connect to Cloudflare R2", http.StatusInternalServerError)
 		return
 	}
+	// Upload image to Cloudflare R2 storage
 	downloadPath, downloadURL, err := r2Client.UploadJobImage(ctx, jobID, outputPath, "." + outputExt)
 	if err != nil {
 		http.Error(w, "Server error attempting to download converted output", http.StatusInternalServerError)
 		return
 	}
+	// Set up view variables to ensure that the viewing link will be viewable regardless of native browser support 
 	var viewPath string
 	var viewURL string
 	var e error
+	// Check if extension is already supported
 	if !webSafeFormats[outputExt] {
+		// Construct output of unsafe extension that was converted
 		unsafeFilePath := outputPath
+		// Convert unsafe extension to a png (since it's viewable and yeah)
 		cmd := exec.CommandContext(ctx, absCliPath, unsafeFilePath, workDir, "png", "{}")
+		// Capture output and error
 		cliOutput, err := cmd.CombinedOutput()
 		if err != nil {
 			http.Error(w, fmt.Sprintf("conversion failed: %s", strings.TrimSpace(string(cliOutput))), http.StatusUnprocessableEntity)
 			return
 		}
+		// Construct png local disk location
 		pngOutputPath := filepath.Join(workDir, baseName + ".png")
-		downloadPath, _, err = r2Client.UploadJobImage(ctx, jobID, pngOutputPath, ".png")
+		// Upload png to Cloudflare R2
+		tmpDownloadPath, _, err := r2Client.UploadJobImage(ctx, jobID, pngOutputPath, ".png")
 		if err != nil {
 			http.Error(w, "Server error attempting to download converted output", http.StatusInternalServerError)
 			return
 		}
-		viewPath, viewURL, e = r2Client.CreateViewCopy(ctx, downloadPath, ".png")
+		// Create a copy that is for viewing purposes (the uploading results in download link)
+		viewPath, viewURL, e = r2Client.CreateViewCopy(ctx, tmpDownloadPath, ".png")
 		if e != nil {
 			http.Error(w, "Server error attempting to view converted output", http.StatusInternalServerError)
 			return
 		}
+		// Delete older png
+		_ = r2Client.DeleteJobImage(ctx, jobID, ".png")
 	} else {
+		// Create a viewable link for the image since it has native browser support
 		viewPath, viewURL, err = r2Client.CreateViewCopy(ctx, downloadPath, "." + outputExt)
 		if err != nil {
 			http.Error(w, "Server error attempting to view converted output", http.StatusInternalServerError)
 			return
 		}
 	}
+	// Construct meta data to be used later for a given job (sweeping, sharing, reusing CRIDS, etc)
 	metaData := map[string]string{
 		"jobID": jobID,
+		"createdAt": time.Now().UTC().Format(time.RFC3339),
 		"downloadURL": downloadURL,
 		"viewURL": viewURL,
 		"download_CRID": "",
 		"view_CRID": "",
 	}
+	// Create meta data into a json objec
 	jsonData, err := json.Marshal(metaData)
 	if err != nil {
 		http.Error(w, "Server error attempting to create meta data", http.StatusInternalServerError)
 		return
 	}
+	// Construct meta.json location
 	metaPath := filepath.Join(workDir, "meta.json")
+	// Write json file to local disk for uploading
 	err = os.WriteFile(metaPath, jsonData, 0644)
 	if err != nil {
 		http.Error(w, "Server error attempting to write meta data", http.StatusInternalServerError)
 		return
 	}
+	// Upload meta.json to its respective job directory
 	err = r2Client.UploadMetadata(ctx, metaPath, jobID)
 	if err != nil {
 		http.Error(w, "Unable to upload meta data", http.StatusInternalServerError)
@@ -250,10 +269,12 @@ func convertHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func viewHandler(w http.ResponseWriter, r *http.Request) {
+	// Ensure proper http method before beginning
 	if r.Method != http.MethodGet {
 		http.Error(w, "use GET", http.StatusMethodNotAllowed)
 		return
 	}
+	// Set up context
 	ctx, _ := context.WithTimeout(r.Context(), 30*time.Second)
 	// Set up R2 client to begin upload
 	r2Client, err := storage.NewR2Client(ctx)
@@ -262,51 +283,70 @@ func viewHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Server error attempting to connect to Cloudflare R2", http.StatusInternalServerError)
 		return
 	}
+	// Extract job ID from view button request
 	jobID := r.PathValue("jobID")
+	// Fetch meta.json from the specified job id directory
 	jsonData, err := r2Client.GetMetadata(ctx, jobID)
 	if err != nil {
 		http.Error(w, "Server error attempting to get meta data", http.StatusInternalServerError)
 		return
 	}
+	// Set crid variable
 	var crid string
+	// Check if there isn't already a CRID to share
 	if jsonData["view_CRID"] == "" {
+		// Extract viewing URL
 		viewURL := jsonData["viewURL"]
+		// Construct publishing command with -q to ensure only the generated CRID is captured
 		publishCmd := exec.Command("qurl", "publish", "-q", viewURL)
+		// Capture output and error
 		cridBytes, err := publishCmd.CombinedOutput()
 		if err != nil {
 			http.Error(w, "Server error attempting to publish resource", http.StatusInternalServerError)
 			return
 		}
+		// Extract CRID
 		crid = strings.TrimSpace(string(cridBytes))
+		// Set CRID
 		jsonData["view_CRID"] = crid
+		// Set directory of job id
 		workDir := filepath.Join(jobPath, jsonData["jobID"])
+		// Set directory of meta.json
 		metaPath := filepath.Join(workDir, "meta.json")
+		// Convert meta.json (in memory / loaded in) into an actual json object
 		data, err := json.Marshal(jsonData)
 		if err != nil {
 			http.Error(w, "Server error attempting to create meta data", http.StatusInternalServerError)
 			return
 		}
+		// Write the meta.json file into local disk
 		err = os.WriteFile(metaPath, data, 0644)
 		if err != nil {
 			http.Error(w, "Server error attempting to write meta data", http.StatusInternalServerError)
 			return
 		}
+		// Upload updated meta.json file
 		err = r2Client.UploadMetadata(ctx, metaPath, jobID)
 		if err != nil {
 			http.Error(w, "Unable to upload meta data", http.StatusInternalServerError)
 			return
 		}
 	} else {
+		// Reuse CRID to avoid unnecessary resource creation
 		crid = jsonData["view_CRID"]
 	}
+	// Construct share command
 	shareCmd := exec.Command("qurl", "share", crid)
+	// Capture output and error
 	qurlLinkBytes, err := shareCmd.CombinedOutput()
 	if err != nil {
 		http.Error(w, "Server error attempting to share resource", http.StatusUnprocessableEntity)
 		return
 	}
+	// Set header info 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	// Set response with qURL link to open
 	response := map[string]string{
 		"status": "success",
 		"qurl_link": strings.TrimSpace(string(qurlLinkBytes)),
@@ -315,10 +355,12 @@ func viewHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func downloadHandler(w http.ResponseWriter, r *http.Request) {
+	// Ensure proper http method before beginning
 	if r.Method != http.MethodGet {
 		http.Error(w, "use GET", http.StatusMethodNotAllowed)
 		return
 	}
+	// Set context
 	ctx, _ := context.WithTimeout(r.Context(), 30*time.Second)
 	// Set up R2 client to begin upload
 	r2Client, err := storage.NewR2Client(ctx)
@@ -327,51 +369,70 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Server error attempting to connect to Cloudflare R2", http.StatusInternalServerError)
 		return
 	}
+	// Extract job ID from request
 	jobID := r.PathValue("jobID")
+	// Fetch the job ID's respective meta.json file
 	jsonData, err := r2Client.GetMetadata(ctx, jobID)
 	if err != nil {
 		http.Error(w, "Server error attempting to get meta data", http.StatusInternalServerError)
 		return
 	}
+	// Set crid variable
 	var crid string
+	// Check if there is already a CRID to share
 	if jsonData["download_CRID"] == "" {
+		// Extract download URL from meta.json
 		downloadURL := jsonData["downloadURL"]
+		// Construct publish command
 		publishCmd := exec.Command("qurl", "publish", "-q", downloadURL)
+		// Capture output and error
 		cridBytes, err := publishCmd.CombinedOutput()
 		if err != nil {
 			http.Error(w, "Server error attempting to publish resource", http.StatusInternalServerError)
 			return
 		}
+		// Extract crid
 		crid = strings.TrimSpace(string(cridBytes))
+		// Set crid value
 		jsonData["download_CRID"] = crid
+		// Construct job id direcotry
 		workDir := filepath.Join(jobPath, jsonData["jobID"])
+		// Set meta.json path
 		metaPath := filepath.Join(workDir, "meta.json")
+		// Convert meta.json (in memory / loaded in) into an actual json object
 		data, err := json.Marshal(jsonData)
 		if err != nil {
 			http.Error(w, "Server error attempting to create meta data", http.StatusInternalServerError)
 			return
 		}
+		// Write json file into local disk
 		err = os.WriteFile(metaPath, data, 0644)
 		if err != nil {
 			http.Error(w, "Server error attempting to write meta data", http.StatusInternalServerError)
 			return
 		}
+		// Upload updated meta.json file
 		err = r2Client.UploadMetadata(ctx, metaPath, jobID)
 		if err != nil {
 			http.Error(w, "Unable to upload meta data", http.StatusInternalServerError)
 			return
 		}
 	} else {
+		// Reuse CRID to avoid to avou unnecessary resource creation
 		crid = jsonData["download_CRID"]
 	}
+	// Construct share command
 	shareCmd := exec.Command("qurl", "share", crid)
+	// Capture output and error
 	qurlLinkBytes, err := shareCmd.CombinedOutput()
 	if err != nil {
 		http.Error(w, "Server error attempting to share resource", http.StatusUnprocessableEntity)
 		return
 	}
+	// Set header info
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	// Set response with qURL link to open
 	response := map[string]string{
 		"status": "success",
 		"qurl_link": strings.TrimSpace(string(qurlLinkBytes)),
@@ -379,52 +440,56 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-/* sweepStaleJobs removes job directories under root whose most recent
-   modification time is older than maxAge. It's written as a pure-ish
-   function (root/maxAge/now all passed in, no ticker or global state) so it
-   can be unit tested directly instead of only through a real hour-long
-   ticker. Returns the number of job directories removed. */
 func sweepStaleJobs(root string, maxAge time.Duration, now time.Time) (removed int, err error) {
+	// Read job_store directory
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return 0, err
 	}
+	// Iterate over job id directories
 	for _, e := range entries {
+		// Ensure we are only iterating over jobs
 		if !e.IsDir() {
 			// job_store should only ever contain per-job subdirectories;
 			// skip anything else rather than deleting it.
 			continue
 		}
+		// Extract job id directory info
 		info, err := e.Info()
 		if err != nil {
 			log.Printf("sweeper: could not stat %s: %v", e.Name(), err)
 			continue
 		}
+		// Check if it passes the max age that a job id directory should live to
 		if now.Sub(info.ModTime()) > maxAge {
+			// Set path directory of job id
 			path := filepath.Join(root, e.Name())
+			// Ensure directory removal is sucessful
 			if err := os.RemoveAll(path); err != nil {
 				log.Printf("sweeper: failed to remove %s: %v", path, err)
 				continue
 			}
+			// Increment job removed count
 			removed++
 		}
 	}
+	// Return count and no errors
 	return removed, nil
 }
- 
-// startJobStoreSweeper runs sweepStaleJobs on a ticker for the lifetime of
-// the process. This is the fix for "what happens to job_store after 10,000
-// conversions": left alone it grows forever, so this sweeps it every
-// interval and deletes anything older than maxAge.
+
 func startJobStoreSweeper(root string, interval, maxAge time.Duration) {
+	// Set up ticker using provided interval
 	ticker := time.NewTicker(interval)
 	go func() {
+		// Iterate over read-only channcel from interval
 		for range ticker.C {
+			// Sweep jobs
 			removed, err := sweepStaleJobs(root, maxAge, time.Now())
 			if err != nil {
 				log.Printf("sweeper: error reading job store %s: %v", root, err)
 				continue
 			}
+			// Log jobs removed (if any)
 			if removed > 0 {
 				log.Printf("sweeper: removed %d stale job(s) older than %s", removed, maxAge)
 			}
@@ -432,9 +497,104 @@ func startJobStoreSweeper(root string, interval, maxAge time.Duration) {
 	}()
 }
 
+func deleteCRID(crid string) error {
+	// Ensure crid isn't empty before beginnign
+	if crid == "" {
+		return nil
+	}
+	// Construct deletion command
+	cmd := exec.Command("qurl", "delete", crid)
+	// Capture output and error
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("Deleting %s: %s: %w",  crid, strings.TrimSpace(string(output)), err)
+	}
+	// Return nothing (success)
+	return nil
+}
+
+func sweepR2Jobs(ctx context.Context, r2Client *storage.R2Client, maxAge time.Duration, now time.Time) (removed int, err error) {
+	// Extract a list of all job ids in the Cloudflare R2 storage
+	jobIDs, err := r2Client.ListJobPrefixes(ctx)
+	if err != nil {
+		return 0, err
+	}
+	// Iterate over each job
+	for _, jobID := range jobIDs {
+		// Extract meta data from each job id directory
+		meta, err := r2Client.GetMetadata(ctx, jobID)
+		if err != nil {
+			log.Printf("r2 sweeper: could not read meta.json for %s, skipping: %v", jobID, err)
+			continue
+		}
+		// Extract the data when the view / download urls were created
+		createdAtStr, ok := meta["createdAt"]
+		if !ok || createdAtStr == "" {
+			log.Printf("r2 sweeper: %s has no createdAt, skipping", jobID)
+			continue
+		}
+		// Parse into an actual time object
+		createdAt, err := time.Parse(time.RFC3339, createdAtStr)
+		if err != nil {
+			log.Printf("r2 sweeper: %s has unparseable createdAt %q, skipping", jobID, createdAtStr)
+			continue
+		}
+		// Check if the given job id has "expired" (should be 1 day)
+		if now.Sub(createdAt) <= maxAge {
+			continue
+		}
+		// Ensure successful deletion of view CRID
+		if err := deleteCRID(meta["view_CRID"]); err != nil {
+			log.Printf("r2 sweeper: %s view CRID revoke failed: %v", jobID, err)
+		}
+		// Ensure successful deletion of download CRID
+		if err := deleteCRID(meta["download_CRID"]); err != nil {
+			log.Printf("r2 sweeper: %s download CRID revoke failed: %v", jobID, err)
+		}
+		// Ensure deletion of job id directory in Cloudflare R2 storage
+		if err := r2Client.DeleteJobPrefix(ctx, jobID); err != nil {
+			log.Printf("r2 sweeper: failed to delete %s: %v", jobID, err)
+			continue
+		}
+		// Increase sweep count
+		removed++
+	}
+	// Return sweep count and no errors
+	return removed, nil
+}
+
+func startR2Sweeper(interval, maxAge time.Duration) {
+	// Set ticker from given time interval
+	ticker := time.NewTicker(interval)
+	go func() {
+		// Iterate over ticker time read-only channcel interval
+		for range ticker.C {
+			// Setup context
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			// Construct R2Client for sweeping
+			r2Client, err := storage.NewR2Client(ctx)
+			if err != nil {
+				log.Printf("r2 sweeper: could not connect to R2: %v", err)
+				cancel()
+				continue
+			}
+			// Sweep job ids
+			removed, err := sweepR2Jobs(ctx, r2Client, maxAge, time.Now())
+			cancel()
+			if err != nil {
+				log.Printf("r2 sweeper: error listing jobs: %v", err)
+				continue
+			}
+			// Log how many jobs were sweeped (if any)
+			if removed > 0 {
+				log.Printf("r2 sweeper: removed %d stale job(s) older than %s", removed, maxAge)
+			}
+		}
+	}()
+}
 
 func main() {
-	// Load in .env variables from either a local .env or env variables set on Render.
+	// Load in .env variables from either a local .env or env variables set on Render. (pretty sure this is useless)
 	if err := godotenv.Load(); err != nil {
 		fmt.Printf("warning: could not load .env variables: %v\n", err)
 	}
@@ -442,13 +602,17 @@ func main() {
 	if err := os.MkdirAll(jobPath, 0o755); err != nil {
 		log.Fatalf("Failed to create job store directory: %v", err)
 	}
-
+	// Set up server mux
 	mux := http.NewServeMux()
 	mux.HandleFunc("/convert", convertHandler)
 	mux.HandleFunc("GET /jobs/{jobID}/view", viewHandler)
 	mux.HandleFunc("GET /jobs/{jobID}/download", downloadHandler)
 	// Serve the front-end (index.html, etc.) from ./static
 	mux.Handle("/", http.FileServer(http.Dir("./static")))
+
+	// Start up sweepers (local and cloud)
+	startJobStoreSweeper(jobPath, 4*time.Hour, 24*time.Hour)
+	startR2Sweeper(24*time.Hour, 24*time.Hour)
  
 	/* Explicit timeouts instead of the bare http.ListenAndServe default,
 	   which has none -- a client that trickles bytes in slowly (slowloris)

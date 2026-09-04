@@ -150,6 +150,55 @@ func (r *R2Client) GetMetadata(ctx context.Context, jobID string) (data map[stri
 	return jsonData, nil
 }
 
+func (r *R2Client) ListJobPrefixes(ctx context.Context) ([]string, error) {
+	var jobIDs []string
+	var continuationToken *string
+	for {
+		output, err := r.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket: aws.String(r.bucket),
+			Delimiter: aws.String("/"),
+			ContinuationToken: continuationToken,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("listing job prefixes in R2: %w", err)
+		}
+		for _, prefix := range output.CommonPrefixes {
+			jobIDs = append(jobIDs, strings.TrimSuffix(aws.ToString(prefix.Prefix), "/"))
+		}
+		if output.IsTruncated == nil || !*output.IsTruncated {
+			break
+		}
+		continuationToken = output.NextContinuationToken
+	}
+	return jobIDs, nil
+}
+
+func (r *R2Client) DeleteJobPrefix(ctx context.Context, jobID string) error {
+	prefix := jobID + "/"
+	out, err := r.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket: aws.String(r.bucket),
+		Prefix: aws.String(prefix),
+	})
+	if err != nil {
+		return fmt.Errorf("listing objects under %s: %w", prefix, err)
+	}
+	if len(out.Contents) == 0 {
+		return nil
+	}
+	var objectIDs []types.ObjectIdentifier
+	for _, obj := range out.Contents {
+		objectIDs = append(objectIDs, types.ObjectIdentifier{Key: obj.Key})
+	}
+	_, err = r.client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+		Bucket: aws.String(r.bucket),
+		Delete: &types.Delete{Objects: objectIDs},
+	})
+	if err != nil {
+		return fmt.Errorf("batch deleting objects under %s: %w", prefix, err)
+	}
+	return nil
+}
+
 func main() {
 	return;
 }
